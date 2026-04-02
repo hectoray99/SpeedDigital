@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { useAuthStore } from '../store/authStore';
 import { X, Loader2, Save, DollarSign, Calendar, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -7,10 +8,11 @@ interface Props {
     isOpen: boolean;
     onClose: () => void;
     onSuccess: () => void;
-    studentId: string; // ID de la persona en crm_people
+    studentId: string;
 }
 
 export default function CreateReceivableModal({ isOpen, onClose, onSuccess, studentId }: Props) {
+    const { orgData } = useAuthStore(); // Memoria global
     const [loading, setLoading] = useState(false);
     const [formData, setFormData] = useState({
         concept: '',
@@ -22,25 +24,16 @@ export default function CreateReceivableModal({ isOpen, onClose, onSuccess, stud
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (!orgData?.id) return;
         setLoading(true);
 
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            const { data: profile } = await supabase
-                .from('profiles')
-                .select('organization_id')
-                .eq('id', user?.id)
-                .single();
-
-            if (!profile) throw new Error('Error de sesión');
-
-            // NUEVA LÓGICA: Insertar en 'operations' como deuda pendiente
             const { error } = await supabase.from('operations').insert({
-                organization_id: profile.organization_id,
+                organization_id: orgData.id, // Inyectamos directo
                 person_id: studentId,
-                status: 'pending', // <--- Pendiente de pago
+                status: 'pending',
                 total_amount: parseFloat(formData.amount),
-                balance: parseFloat(formData.amount), // El balance inicial es igual al total
+                balance: parseFloat(formData.amount),
                 metadata: {
                     concept: formData.concept,
                     due_date: formData.due_date
@@ -73,7 +66,6 @@ export default function CreateReceivableModal({ isOpen, onClose, onSuccess, stud
                 </div>
 
                 <form onSubmit={handleSubmit} className="p-6 space-y-4">
-                    {/* Concepto */}
                     <div>
                         <label className="block text-xs font-medium text-slate-700 mb-1">Concepto *</label>
                         <div className="relative">
@@ -90,7 +82,6 @@ export default function CreateReceivableModal({ isOpen, onClose, onSuccess, stud
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
-                        {/* Monto */}
                         <div>
                             <label className="block text-xs font-medium text-slate-700 mb-1">Monto ($) *</label>
                             <div className="relative">
@@ -106,7 +97,6 @@ export default function CreateReceivableModal({ isOpen, onClose, onSuccess, stud
                             </div>
                         </div>
 
-                        {/* Vencimiento */}
                         <div>
                             <label className="block text-xs font-medium text-slate-700 mb-1">Vencimiento *</label>
                             <div className="relative">

@@ -2,6 +2,7 @@ import { Fragment, useState, useEffect } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { X, Loader2, Search, ShoppingCart, Trash2, Check, ArrowRight } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useAuthStore } from '../store/authStore';
 import { toast } from 'sonner';
 
 interface CreateOperationModalProps {
@@ -11,20 +12,18 @@ interface CreateOperationModalProps {
 }
 
 export default function CreateOperationModal({ isOpen, onClose, onSuccess }: CreateOperationModalProps) {
-    const [step, setStep] = useState(1); // 1: Cliente, 2: Carrito, 3: Pago
+    const { orgData } = useAuthStore(); // Traemos el tenant desde la memoria global
+    const [step, setStep] = useState(1);
     const [loading, setLoading] = useState(false);
 
-    // Búsquedas
     const [searchTerm, setSearchTerm] = useState('');
     const [searchResults, setSearchResults] = useState<any[]>([]);
     const [searching, setSearching] = useState(false);
 
-    // Selección
     const [selectedPerson, setSelectedPerson] = useState<any>(null);
     const [cart, setCart] = useState<any[]>([]);
     const [paymentMethod, setPaymentMethod] = useState('cash');
 
-    // Reiniciar al abrir
     useEffect(() => {
         if (isOpen) {
             setStep(1);
@@ -36,7 +35,6 @@ export default function CreateOperationModal({ isOpen, onClose, onSuccess }: Cre
         }
     }, [isOpen]);
 
-    // Búsqueda dinámica
     useEffect(() => {
         const timer = setTimeout(async () => {
             if (searchTerm.length < 2) {
@@ -61,7 +59,6 @@ export default function CreateOperationModal({ isOpen, onClose, onSuccess }: Cre
         return () => clearTimeout(timer);
     }, [searchTerm, step]);
 
-    // Lógica del Carrito
     const addToCart = (product: any) => {
         setCart(prev => {
             const existing = prev.find(p => p.id === product.id);
@@ -79,19 +76,14 @@ export default function CreateOperationModal({ isOpen, onClose, onSuccess }: Cre
 
     const cartTotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
 
-    // PROCESAR VENTA
     const handleCheckout = async () => {
+        if (!orgData?.id) return;
         setLoading(true);
+
         try {
             if (!selectedPerson) throw new Error('No se seleccionó cliente');
 
-            const { data: { user } } = await supabase.auth.getUser();
-            const { data: profile } = await supabase.from('profiles').select('organization_id').eq('id', user?.id).single();
-
-            // VALIDACIÓN CRÍTICA PARA TYPESCRIPT
-            if (!profile) throw new Error('No se encontró el perfil del usuario');
-
-            const orgId = profile.organization_id;
+            const orgId = orgData.id;
 
             // 1. Crear Operación
             const { data: op, error: opError } = await supabase
@@ -153,7 +145,6 @@ export default function CreateOperationModal({ isOpen, onClose, onSuccess }: Cre
                     <div className="flex min-h-full items-center justify-center p-4">
                         <Dialog.Panel className="w-full max-w-2xl transform overflow-hidden rounded-2xl bg-white shadow-2xl transition-all flex flex-col min-h-[500px]">
 
-                            {/* Header */}
                             <div className="bg-slate-50 px-6 py-4 border-b border-slate-100 flex justify-between items-center">
                                 <Dialog.Title className="text-lg font-bold text-slate-800">
                                     {step === 1 ? 'Seleccionar Cliente' : 'Cargar Productos'}
@@ -161,16 +152,13 @@ export default function CreateOperationModal({ isOpen, onClose, onSuccess }: Cre
                                 <button onClick={onClose}><X className="w-5 h-5 text-slate-400" /></button>
                             </div>
 
-                            {/* Body */}
                             <div className="p-6 flex-1 flex flex-col">
-
                                 <div className="flex gap-2 mb-6">
                                     <div className={`h-1 flex-1 rounded-full ${step >= 1 ? 'bg-brand-500' : 'bg-slate-100'}`} />
                                     <div className={`h-1 flex-1 rounded-full ${step >= 2 ? 'bg-brand-500' : 'bg-slate-100'}`} />
                                     <div className={`h-1 flex-1 rounded-full ${step >= 3 ? 'bg-brand-500' : 'bg-slate-100'}`} />
                                 </div>
 
-                                {/* PASO 1: CLIENTE */}
                                 {step === 1 && (
                                     <div className="space-y-4">
                                         <div className="relative">
@@ -209,10 +197,8 @@ export default function CreateOperationModal({ isOpen, onClose, onSuccess }: Cre
                                     </div>
                                 )}
 
-                                {/* PASO 2: PRODUCTOS Y CARRITO */}
                                 {step === 2 && (
                                     <div className="flex-1 flex gap-6">
-                                        {/* Izquierda: Buscador */}
                                         <div className="flex-1 space-y-4">
                                             <div className="relative">
                                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
@@ -242,7 +228,6 @@ export default function CreateOperationModal({ isOpen, onClose, onSuccess }: Cre
                                             </div>
                                         </div>
 
-                                        {/* Derecha: Resumen */}
                                         <div className="w-72 bg-slate-50 rounded-xl p-4 flex flex-col">
                                             <div className="flex items-center gap-2 mb-4 pb-2 border-b border-slate-200">
                                                 <div className="w-8 h-8 rounded-full bg-white border border-slate-200 flex items-center justify-center text-xs font-bold">
@@ -289,7 +274,6 @@ export default function CreateOperationModal({ isOpen, onClose, onSuccess }: Cre
                                     </div>
                                 )}
 
-                                {/* PASO 3: CONFIRMAR PAGO */}
                                 {step === 3 && (
                                     <div className="flex flex-col items-center justify-center flex-1 space-y-6">
                                         <div className="text-center">
@@ -303,8 +287,8 @@ export default function CreateOperationModal({ isOpen, onClose, onSuccess }: Cre
                                                     key={method}
                                                     onClick={() => setPaymentMethod(method)}
                                                     className={`p-4 rounded-xl border-2 font-medium capitalize transition-all ${paymentMethod === method
-                                                            ? 'border-brand-500 bg-brand-50 text-brand-700'
-                                                            : 'border-slate-100 hover:border-slate-300 text-slate-600'
+                                                        ? 'border-brand-500 bg-brand-50 text-brand-700'
+                                                        : 'border-slate-100 hover:border-slate-300 text-slate-600'
                                                         }`}
                                                 >
                                                     {method === 'cash' ? 'Efectivo' : method}

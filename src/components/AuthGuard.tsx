@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
 import { Loader2 } from 'lucide-react';
+import { useAuthStore } from '../store/authStore';
+
 
 interface AuthGuardProps {
     children: React.ReactNode;
@@ -9,41 +10,30 @@ interface AuthGuardProps {
 
 export default function AuthGuard({ children }: AuthGuardProps) {
     const navigate = useNavigate();
-    const [loading, setLoading] = useState(true);
+    const { user, isLoading, initializeAuth } = useAuthStore();
 
     useEffect(() => {
-        const checkAuth = async () => {
-            // 1. Preguntamos a Supabase si hay alguien logueado
-            const { data: { session } } = await supabase.auth.getSession();
+        // Arrancamos la verificación global
+        initializeAuth();
+    }, []);
 
-            if (!session) {
-                // 2. Si no hay nadie, patada al Login
-                navigate('/', { replace: true });
-            } else {
-                // 3. Si hay sesión, dejamos pasar
-                setLoading(false);
-            }
-        };
+    useEffect(() => {
+        // Si ya terminó de cargar y no hay usuario, patada al login
+        if (!isLoading && !user) {
+            navigate('/login', { replace: true });
+        }
+    }, [user, isLoading, navigate]);
 
-        checkAuth();
-
-        // Listener: Si la sesión se corta (ej: logout en otra pestaña), lo sacamos
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-            if (event === 'SIGNED_OUT' || !session) {
-                navigate('/', { replace: true });
-            }
-        });
-
-        return () => subscription.unsubscribe();
-    }, [navigate]);
-
-    if (loading) {
+    if (isLoading) {
         return (
             <div className="h-screen w-screen flex items-center justify-center bg-slate-900 text-white">
-                <Loader2 className="w-8 h-8 animate-spin text-brand-500" />
+                <div className="flex flex-col items-center gap-4">
+                    <Loader2 className="w-8 h-8 animate-spin text-brand-500" />
+                    <p className="text-sm font-medium animate-pulse text-slate-400">Verificando seguridad...</p>
+                </div>
             </div>
         );
     }
 
-    return <>{children}</>;
+    return user ? <>{children}</> : null;
 }

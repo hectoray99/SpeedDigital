@@ -14,8 +14,8 @@ export default function Landing() {
     const verticals = [
         { label: "Gimnasio", icon: <Dumbbell className="w-6 h-6 text-emerald-400" />, color: "text-emerald-400" },
         { label: "Restaurante", icon: <Coffee className="w-6 h-6 text-orange-400" />, color: "text-orange-400" },
-        { label: "Consultora", icon: <Briefcase className="w-6 h-6 text-blue-400" />, color: "text-blue-400" },
-        { label: "Negocio", icon: <Zap className="w-6 h-6 text-yellow-400" />, color: "text-yellow-400" },
+        { label: "Servicios y Reservas", icon: <Briefcase className="w-6 h-6 text-blue-400" />, color: "text-blue-400" },
+
     ];
 
     useEffect(() => {

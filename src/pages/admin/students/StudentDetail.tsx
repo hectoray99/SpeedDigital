@@ -3,12 +3,12 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../../lib/supabase';
 import {
     User, Phone, Mail, ArrowLeft, Save, Loader2,
-    CreditCard, History, AlertTriangle, CheckCircle
+    CreditCard, History, AlertTriangle, CheckCircle, Store, Calendar, Clock, Hash
 } from 'lucide-react';
 import { toast } from 'sonner';
-import RegisterPaymentModal from '../../../components/RegisterPaymentModal'; // <--- Importamos el modal
+import RegisterPaymentModal from '../../../components/RegisterPaymentModal';
+import EnrollModal from '../../../components/EnrollModal';
 
-// Interfaz para el perfil
 interface PersonProfile {
     id: string;
     full_name: string;
@@ -16,6 +16,7 @@ interface PersonProfile {
     email: string | null;
     phone: string | null;
     is_active: boolean;
+    details: any; // <--- Agregamos details para leer los planes
 }
 
 export default function StudentDetail() {
@@ -25,17 +26,17 @@ export default function StudentDetail() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
 
-    // Datos del cliente
     const [profile, setProfile] = useState<PersonProfile | null>(null);
 
-    // Datos financieros
     const [balance, setBalance] = useState(0);
-    const [pendingDebts, setPendingDebts] = useState<any[]>([]); // <--- Guardamos las deudas completas
+    const [pendingDebts, setPendingDebts] = useState<any[]>([]);
     const [movements, setMovements] = useState<any[]>([]);
 
-    // Modal de Cobro
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
     const [selectedDebt, setSelectedDebt] = useState<any>(null);
+
+    // --- ESTADO MODAL DE PLANES ---
+    const [isEnrollModalOpen, setIsEnrollModalOpen] = useState(false);
 
     useEffect(() => {
         if (id) fetchStudentData();
@@ -45,7 +46,6 @@ export default function StudentDetail() {
         try {
             setLoading(true);
 
-            // 1. Obtener Datos Personales
             const { data: person, error: personError } = await supabase
                 .from('crm_people')
                 .select('*')
@@ -55,21 +55,19 @@ export default function StudentDetail() {
             if (personError) throw personError;
             setProfile(person);
 
-            // 2. Obtener DEUDAS (Con todos los datos necesarios para cobrar)
             const { data: debts } = await supabase
                 .from('operations')
-                .select('id, balance, metadata, person_id') // <--- Traemos ID y Metadata
+                .select('id, balance, metadata, person_id')
                 .eq('person_id', id)
                 .gt('balance', 0)
                 .neq('status', 'cancelled')
-                .order('created_at', { ascending: true }); // Las más viejas primero
+                .order('created_at', { ascending: true });
 
             const debtList = debts || [];
             setPendingDebts(debtList);
             const totalDebt = debtList.reduce((sum, item) => sum + item.balance, 0);
             setBalance(totalDebt);
 
-            // 3. Obtener Historial
             const { data: history } = await supabase
                 .from('finance_ledger')
                 .select('*')
@@ -113,34 +111,49 @@ export default function StudentDetail() {
         }
     };
 
-    // Lógica para abrir el modal de cobro
     const handleOpenPayment = () => {
         if (pendingDebts.length === 0) return;
-
-        // Seleccionamos la deuda más antigua por defecto para cobrar
-        // (Podrías hacer una lista para elegir, pero esto es más rápido)
         setSelectedDebt(pendingDebts[0]);
         setIsPaymentModalOpen(true);
+    };
+
+    // Función para manejar el array de planes con retrocompatibilidad
+    const getActivePlans = () => {
+        if (!profile?.details) return [];
+        let plans = profile.details.active_plans || [];
+        if (plans.length === 0 && profile.details.active_plan) {
+            plans = [profile.details.active_plan];
+        }
+        return plans;
     };
 
     if (loading) return <div className="p-10 text-center text-slate-400">Cargando legajo...</div>;
     if (!profile) return null;
 
+    const activePlansList = getActivePlans();
+
     return (
         <div className="max-w-5xl mx-auto space-y-6">
 
-            {/* --- MODAL DE COBRO CONECTADO --- */}
             <RegisterPaymentModal
                 isOpen={isPaymentModalOpen}
                 onClose={() => setIsPaymentModalOpen(false)}
                 onSuccess={() => {
-                    fetchStudentData(); // Recargamos datos tras el cobro
+                    fetchStudentData();
                     setIsPaymentModalOpen(false);
                 }}
                 receivable={selectedDebt}
             />
 
-            {/* Header de Navegación */}
+            {/* --- MODAL PARA ASIGNAR PLANES --- */}
+            <EnrollModal
+                isOpen={isEnrollModalOpen}
+                onClose={() => setIsEnrollModalOpen(false)}
+                studentId={profile.id}
+                studentName={profile.full_name}
+                onSuccess={fetchStudentData}
+            />
+
             <button
                 onClick={() => navigate('/admin/students')}
                 className="flex items-center gap-2 text-slate-500 hover:text-slate-800 transition-colors font-medium"
@@ -150,8 +163,8 @@ export default function StudentDetail() {
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-                {/* COLUMNA IZQUIERDA: Datos Editables */}
                 <div className="lg:col-span-2 space-y-6">
+                    {/* TARJETA DATOS PERSONALES */}
                     <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                         <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                             <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
@@ -175,13 +188,12 @@ export default function StudentDetail() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Identificador (DNI/CUIT)</label>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Identificador (DNI)</label>
                                     <input
                                         type="text"
                                         className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500/20 outline-none bg-slate-50 text-slate-500 cursor-not-allowed"
                                         value={profile.identifier || ''}
                                         readOnly
-                                        title="El identificador no se puede cambiar por seguridad"
                                     />
                                 </div>
                                 <div>
@@ -222,11 +234,64 @@ export default function StudentDetail() {
                             </div>
                         </form>
                     </div>
+
+                    {/* TARJETA DE PLANES ACTIVOS */}
+                    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                            <div>
+                                <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                                    <Store className="w-5 h-5 text-brand-600" />
+                                    Planes y Disciplinas
+                                </h2>
+                                <p className="text-xs text-slate-500 mt-1">Servicios a los que está inscripto</p>
+                            </div>
+                            <button
+                                onClick={() => setIsEnrollModalOpen(true)}
+                                className="bg-brand-500 hover:bg-brand-600 text-brand-700 border border-brand-200 px-4 py-2 rounded-xl text-sm font-bold transition-colors shadow-sm"
+                            >
+                                Asignar Nuevo
+                            </button>
+                        </div>
+
+                        <div className="p-6">
+                            {activePlansList.length === 0 ? (
+                                <div className="text-center py-6 text-slate-500 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                                    No hay planes activos.
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    {activePlansList.map((plan: any, idx: number) => {
+                                        const isExpired = new Date() > new Date(plan.expires_at);
+                                        return (
+                                            <div key={idx} className={`p-4 rounded-xl border ${isExpired ? 'bg-red-50 border-red-200' : 'bg-white border-slate-200 shadow-sm'}`}>
+                                                <h4 className="font-bold text-slate-800 mb-2">{plan.name}</h4>
+                                                <div className="space-y-1.5 text-sm">
+                                                    <p className={`flex items-center gap-2 ${isExpired ? 'text-red-600 font-medium' : 'text-slate-500'}`}>
+                                                        <Calendar className="w-4 h-4" />
+                                                        Vence: {new Date(plan.expires_at).toLocaleDateString()}
+                                                    </p>
+                                                    {plan.mode === 'classes' && (
+                                                        <p className="flex items-center gap-2 text-slate-500">
+                                                            <Hash className="w-4 h-4" />
+                                                            {plan.remaining_classes} clases restantes
+                                                        </p>
+                                                    )}
+                                                    <p className="flex items-center gap-2 text-slate-500 capitalize">
+                                                        <Clock className="w-4 h-4" />
+                                                        {plan.schedule === 'free' ? 'Libre' : plan.schedule === 'morning' ? 'Mañana' : plan.schedule === 'afternoon' ? 'Tarde' : 'Noche'}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    </div>
                 </div>
 
                 {/* COLUMNA DERECHA: Resumen Financiero */}
                 <div className="space-y-6">
-                    {/* Tarjeta de Saldo */}
                     <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
                         <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wide mb-4">Estado de Cuenta</h3>
 
@@ -242,7 +307,6 @@ export default function StudentDetail() {
                             </div>
                         </div>
 
-                        {/* Botón de Cobro REAL */}
                         {balance > 0 && (
                             <button
                                 onClick={handleOpenPayment}
@@ -252,14 +316,8 @@ export default function StudentDetail() {
                                 Registrar Cobro
                             </button>
                         )}
-                        {balance > 0 && pendingDebts.length > 1 && (
-                            <p className="text-xs text-center text-slate-400 mt-2">
-                                Se cobrará la deuda más antigua primero.
-                            </p>
-                        )}
                     </div>
 
-                    {/* Últimos Movimientos */}
                     <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                         <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center gap-2">
                             <History className="w-4 h-4 text-slate-500" />

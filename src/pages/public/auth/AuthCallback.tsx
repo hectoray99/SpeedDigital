@@ -2,35 +2,40 @@ import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../../lib/supabase';
 import { Loader2 } from 'lucide-react';
+import { useAuthStore } from '../../../store/authStore';
 
 export default function AuthCallback() {
     const navigate = useNavigate();
+    const { initializeAuth } = useAuthStore(); // Traemos nuestro cerebro central
 
     useEffect(() => {
-        const handleAuthCallback = async () => {
-            // Supabase detecta el código en la URL automáticamente y crea la sesión
-            const { data: { session }, error } = await supabase.auth.getSession();
-
-            if (error) {
-                console.error('Error en AuthCallback:', error);
-                navigate('/login'); // Si falla, volver al login
-                return;
+        // Esta es la forma oficial y segura de escuchar a Google OAuth
+        const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+            if (event === 'SIGNED_IN' && session) {
+                try {
+                    // Forzamos al cerebro a cargar los datos (con los reintentos que le programamos)
+                    await initializeAuth();
+                    // Una vez cargado, lo mandamos al Dashboard
+                    navigate('/admin/dashboard', { replace: true });
+                } catch (error) {
+                    console.error("Error cargando perfil post-Google:", error);
+                    navigate('/login', { replace: true });
+                }
+            } else if (event === 'SIGNED_OUT') {
+                navigate('/login', { replace: true });
             }
+        });
 
-            if (session) {
-                // ¡Éxito! Redirigir al Dashboard
-                // Usamos 'replace: true' para que no puedan volver atrás a esta pantalla de carga
-                navigate('/admin/dashboard', { replace: true });
-            }
+        // Limpieza del listener cuando el componente muere
+        return () => {
+            authListener.subscription.unsubscribe();
         };
-
-        handleAuthCallback();
-    }, [navigate]);
+    }, [navigate, initializeAuth]);
 
     return (
         <div className="flex flex-col items-center justify-center min-h-screen bg-slate-900 text-white gap-4">
             <Loader2 className="w-10 h-10 animate-spin text-brand-500" />
-            <p className="text-lg font-medium animate-pulse">Finalizando acceso seguro...</p>
+            <p className="text-slate-400 font-medium animate-pulse">Sincronizando de forma segura...</p>
         </div>
     );
 }

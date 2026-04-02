@@ -1,60 +1,59 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useParams, Link } from 'react-router-dom';
 import { supabase } from '../../../lib/supabase';
-import { User, Lock, Loader2, ArrowLeft, LayoutTemplate } from 'lucide-react';
+import { usePortalStore } from '../../../store/portalStore';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
+import { ArrowLeft, LayoutTemplate, User, Lock, Loader2 } from 'lucide-react';
 
 export default function StudentLogin() {
+    const { slug } = useParams();
+    const navigate = useNavigate();
+    const { loginStudent } = usePortalStore();
+
     const [identifier, setIdentifier] = useState('');
     const [password, setPassword] = useState('');
-    const [loading, setLoading] = useState(false);
-    const navigate = useNavigate();
+    const [isLoading, setIsLoading] = useState(false); // Usamos isLoading
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!identifier.trim() || !password.trim()) {
-            toast.error('Ingresá usuario y contraseña');
-            return;
-        }
+        setIsLoading(true);
 
-        setLoading(true);
         try {
-            // Buscamos en crm_people
-            const { data, error } = await supabase
+            // 1. Buscamos a la persona que coincida con el identificador (DNI) Y la contraseña
+            const { data: student, error } = await supabase
                 .from('crm_people')
-                .select('id, full_name, organization_id, organizations(name, industry)')
-                .eq('identifier', identifier.trim())
-                .eq('portal_password', password.trim())
-                .eq('is_active', true)
-                .maybeSingle();
+                .select('id, organization_id')
+                .eq('identifier', identifier)
+                .eq('portal_password', password)
+                .single();
 
-            if (error) throw error;
-
-            if (!data) {
-                toast.error('Credenciales incorrectas o usuario inactivo');
-            } else {
-                // CORRECCIÓN TS: Manejo seguro de la relación 'organizations'
-                // Forzamos el tipo a 'any' para evitar errores si TS cree que es un array
-                const rawOrg = data.organizations as any;
-                const orgData = Array.isArray(rawOrg) ? rawOrg[0] : rawOrg;
-
-                localStorage.setItem('portal_token', JSON.stringify({
-                    id: data.id,
-                    name: data.full_name,
-                    org_name: orgData?.name || 'Academia',
-                    industry: orgData?.industry || 'generic'
-                }));
-
-                toast.success(`¡Hola ${data.full_name}!`);
-                navigate('/portal/dashboard');
+            if (error || !student) {
+                toast.error('DNI o contraseña incorrectos');
+                return;
             }
 
-        } catch (error: any) {
+            // 2. Validamos que el alumno pertenezca a la organización del slug actual
+            const { data: org } = await supabase
+                .from('organizations')
+                .select('slug')
+                .eq('id', student.organization_id)
+                .single();
+
+            if (org?.slug !== slug) {
+                toast.error('Este usuario no pertenece a esta institución');
+                return;
+            }
+
+            // 3. ¡Éxito! Guardamos en sesión segura y redirigimos
+            loginStudent(student.id, slug as string);
+            navigate(`/portal/${slug}/dashboard`);
+
+        } catch (error) {
             console.error(error);
-            toast.error('Error de conexión: ' + error.message);
+            toast.error('Ocurrió un error al iniciar sesión');
         } finally {
-            setLoading(false);
+            setIsLoading(false);
         }
     };
 
@@ -131,10 +130,10 @@ export default function StudentLogin() {
                             whileHover={{ scale: 1.02 }}
                             whileTap={{ scale: 0.98 }}
                             type="submit"
-                            disabled={loading}
+                            disabled={isLoading}
                             className="w-full bg-slate-900 hover:bg-black text-white py-4 rounded-xl font-bold text-lg transition-all flex items-center justify-center gap-2 shadow-xl shadow-slate-900/20 disabled:opacity-70 mt-4"
                         >
-                            {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : 'Ingresar al Portal'}
+                            {isLoading ? <Loader2 className="w-6 h-6 animate-spin" /> : 'Ingresar al Portal'}
                         </motion.button>
                     </form>
                 </div>

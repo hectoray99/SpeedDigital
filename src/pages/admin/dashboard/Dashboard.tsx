@@ -1,253 +1,227 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../../lib/supabase';
-import { Users, TrendingUp, AlertCircle, Loader2, ArrowRight } from 'lucide-react';
+import { useAuthStore } from '../../../store/authStore';
+import { DollarSign, Utensils, Receipt, TrendingUp, Loader2, Users } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import DebtorsListModal from '../../../components/DebtorsListModal';
-import OnboardingWizard from '../../../components/OnboardingWizard';
+import { toast } from 'sonner';
 
 export default function Dashboard() {
-    const navigate = useNavigate();
+    const { orgData } = useAuthStore();
     const [loading, setLoading] = useState(true);
-
-    // Estados de Métricas
-    const [stats, setStats] = useState({
-        activeStudents: 0,
-        monthlyIncome: 0,
-        pendingDebt: 0
+    const [metrics, setMetrics] = useState({
+        revenueToday: 0,
+        activeTables: 0,
+        averageTicket: 0,
+        totalOrdersToday: 0
     });
     const [chartData, setChartData] = useState<any[]>([]);
-    const [showDebtorsModal, setShowDebtorsModal] = useState(false);
 
-    // Estados para Onboarding
-    const [showOnboarding, setShowOnboarding] = useState(false);
-    const [orgId, setOrgId] = useState('');
+    const isGastro = orgData?.industry === 'gastronomy';
 
     useEffect(() => {
-        fetchDashboardData();
-    }, []);
+        if (orgData?.id) {
+            fetchDashboardData();
+        }
+    }, [orgData?.id]);
 
     async function fetchDashboardData() {
         try {
             setLoading(true);
 
-            // 1. VERIFICAR SI NECESITA ONBOARDING (Configuración inicial)
-            const { data: { user } } = await supabase.auth.getUser();
-            if (user) {
-                const { data: profile } = await supabase
-                    .from('profiles')
-                    .select('organization_id')
-                    .eq('id', user.id)
-                    .single();
+            // 1. Fecha de hoy (inicio y fin del día)
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const tomorrow = new Date(today);
+            tomorrow.setDate(tomorrow.getDate() + 1);
 
-                if (profile) {
-                    setOrgId(profile.organization_id);
+            // 2. Traer operaciones de HOY
+            const { data: opsToday, error: opsError } = await supabase
+                .from('operations')
+                .select('id, total_amount, status, created_at')
+                .eq('organization_id', orgData.id)
+                .gte('created_at', today.toISOString())
+                .lt('created_at', tomorrow.toISOString());
 
-                    const { data: org } = await supabase
-                        .from('organizations')
-                        .select('setup_completed')
-                        .eq('id', profile.organization_id)
-                        .single();
+            if (opsError) throw opsError;
 
-                    // Si setup_completed es falso, lanzamos el Wizard
-                    if (org && !org.setup_completed) {
-                        setShowOnboarding(true);
-                    }
-                }
+            // 3. Traer datos para el gráfico (Últimos 7 días)
+            const sevenDaysAgo = new Date();
+            sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+            sevenDaysAgo.setHours(0, 0, 0, 0);
+
+            const { data: opsWeek } = await supabase
+                .from('operations')
+                .select('total_amount, created_at')
+                .eq('organization_id', orgData.id)
+                .eq('status', 'paid')
+                .gte('created_at', sevenDaysAgo.toISOString());
+
+            // Cálculos para Gastronomía
+            if (opsToday) {
+                const paidToday = opsToday.filter(op => op.status === 'paid');
+                const pendingToday = opsToday.filter(op => op.status === 'pending');
+
+                const revenue = paidToday.reduce((sum, op) => sum + op.total_amount, 0);
+                const avgTicket = paidToday.length > 0 ? revenue / paidToday.length : 0;
+
+                setMetrics({
+                    revenueToday: revenue,
+                    activeTables: pendingToday.length,
+                    averageTicket: avgTicket,
+                    totalOrdersToday: opsToday.length
+                });
             }
 
-            // 2. MÉTRICAS (Adaptadas a la Nueva Arquitectura)
+            // Armar datos del gráfico agrupados por día
+            if (opsWeek) {
+                const dailyData: Record<string, number> = {};
 
-            // A. Alumnos Activos -> Ahora son 'crm_people' activos
-            const { count: studentsCount } = await supabase
-                .from('crm_people')
-                .select('*', { count: 'exact', head: true })
-                .eq('is_active', true);
-
-            // B. Ingresos del Mes -> Ahora es 'finance_ledger' (type: income)
-            const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
-
-            const { data: movements } = await supabase
-                .from('finance_ledger')
-                .select('amount, processed_at')
-                .eq('type', 'income') // Solo ingresos
-                .gte('processed_at', startOfMonth);
-
-            const totalIncome = movements?.reduce((sum, mov) => sum + Number(mov.amount), 0) || 0;
-
-            // C. Deuda Pendiente -> Ahora son 'operations' con balance > 0
-            const { data: debts } = await supabase
-                .from('operations')
-                .select('balance')
-                .gt('balance', 0) // Balance mayor a 0 significa deuda
-                .neq('status', 'cancelled'); // Ignoramos anuladas
-
-            const totalDebt = debts?.reduce((sum, op) => sum + Number(op.balance), 0) || 0;
-
-            // D. Gráfico de Ingresos Diarios
-            const daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
-            const tempChartData = Array.from({ length: daysInMonth }, (_, i) => ({
-                day: i + 1,
-                amount: 0
-            }));
-
-            movements?.forEach(mov => {
-                const day = new Date(mov.processed_at).getDate();
-                if (tempChartData[day - 1]) {
-                    tempChartData[day - 1].amount += mov.amount;
+                for (let i = 6; i >= 0; i--) {
+                    const d = new Date();
+                    d.setDate(d.getDate() - i);
+                    const dateStr = d.toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric' });
+                    dailyData[dateStr] = 0;
                 }
-            });
 
-            const today = new Date().getDate();
-            setChartData(tempChartData.slice(0, today));
+                opsWeek.forEach(op => {
+                    const dateStr = new Date(op.created_at).toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric' });
+                    if (dailyData[dateStr] !== undefined) {
+                        dailyData[dateStr] += op.total_amount;
+                    }
+                });
 
-            setStats({
-                activeStudents: studentsCount || 0,
-                monthlyIncome: totalIncome,
-                pendingDebt: totalDebt
-            });
+                const formattedChartData = Object.keys(dailyData).map(key => ({
+                    name: key,
+                    Ventas: dailyData[key]
+                }));
+
+                setChartData(formattedChartData);
+            }
 
         } catch (error) {
-            console.error('Error calculando métricas:', error);
+            console.error('Error fetching dashboard:', error);
+            toast.error('Error al cargar métricas');
         } finally {
             setLoading(false);
         }
     }
 
+    if (loading) {
+        return <div className="min-h-[60vh] flex flex-col items-center justify-center text-slate-400"><Loader2 className="w-10 h-10 animate-spin text-brand-500 mb-4" /><p>Analizando datos...</p></div>;
+    }
+
+    const MetricCard = ({ title, value, icon: Icon, subtitle, colorClass, delay }: any) => (
+        <div className={`bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 ease-out flex items-start gap-4 animate-in fade-in slide-in-from-bottom-4 ${delay}`}>
+            <div className={`p-4 rounded-2xl ${colorClass} shrink-0`}>
+                <Icon className="w-6 h-6" />
+            </div>
+            <div>
+                <p className="text-slate-500 font-medium text-sm mb-1">{title}</p>
+                <h3 className="text-3xl font-black text-slate-800 tracking-tight">{value}</h3>
+                <p className="text-slate-400 text-xs mt-2 font-medium">{subtitle}</p>
+            </div>
+        </div>
+    );
+
     return (
-        <div>
-            {/* WIZARD DE BIENVENIDA */}
-            <OnboardingWizard
-                isOpen={showOnboarding}
-                orgId={orgId}
-                onComplete={() => {
-                    setShowOnboarding(false);
-                    window.location.reload();
-                }}
-            />
-
-            <DebtorsListModal
-                isOpen={showDebtorsModal}
-                onClose={() => setShowDebtorsModal(false)}
-            />
-
-            <div className="mb-8">
-                <h1 className="text-3xl font-bold text-slate-800">Panel de Control</h1>
-                <p className="text-slate-500">Resumen financiero y métricas clave.</p>
+        <div className="pb-12 max-w-7xl mx-auto">
+            <div className="mb-8 animate-in fade-in slide-in-from-top-4 duration-500">
+                <h1 className="text-4xl font-black text-slate-900 tracking-tight mb-2">Panel de Control</h1>
+                <p className="text-slate-500 text-lg">Resumen de actividad y facturación en tiempo real.</p>
             </div>
 
-            {loading ? (
-                <div className="flex items-center justify-center h-40">
-                    <Loader2 className="w-8 h-8 animate-spin text-brand-600" />
-                </div>
-            ) : (
-                <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                    {/* --- TARJETAS --- */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
-                            <div>
-                                <p className="text-slate-500 text-sm font-medium mb-1">Clientes Activos</p>
-                                <h3 className="text-3xl font-bold text-slate-800">{stats.activeStudents}</h3>
-                            </div>
-                            <div className="bg-blue-50 p-3 rounded-xl text-blue-600">
-                                <Users className="w-8 h-8" />
-                            </div>
-                        </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                <MetricCard
+                    title="Ingresos de Hoy"
+                    value={`$${metrics.revenueToday.toLocaleString()}`}
+                    icon={DollarSign}
+                    colorClass="bg-emerald-50 text-emerald-600"
+                    subtitle="Facturación cobrada"
+                    delay="delay-0"
+                />
+                <MetricCard
+                    title={isGastro ? "Mesas Activas" : "Clientes Activos"}
+                    value={isGastro ? metrics.activeTables : "0"}
+                    icon={isGastro ? Utensils : Users}
+                    colorClass="bg-blue-50 text-blue-600"
+                    subtitle="Comandas pendientes"
+                    delay="delay-100"
+                />
+                <MetricCard
+                    title={isGastro ? "Ticket Promedio" : "Suscripción Prom."}
+                    value={`$${Math.round(metrics.averageTicket).toLocaleString()}`}
+                    icon={Receipt}
+                    colorClass="bg-purple-50 text-purple-600"
+                    subtitle="Gasto por cuenta"
+                    delay="delay-200"
+                />
+                <MetricCard
+                    title="Operaciones Hoy"
+                    value={metrics.totalOrdersToday}
+                    icon={TrendingUp}
+                    colorClass="bg-brand-50 text-brand-600"
+                    subtitle="Cuentas creadas"
+                    delay="delay-300"
+                />
+            </div>
 
-                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-emerald-100 flex items-center justify-between relative overflow-hidden">
-                            <div className="relative z-10">
-                                <p className="text-slate-500 text-sm font-medium mb-1">Ingresos este Mes</p>
-                                <h3 className="text-3xl font-bold text-emerald-600">${stats.monthlyIncome.toLocaleString()}</h3>
-                            </div>
-                            <div className="bg-emerald-50 p-3 rounded-xl text-emerald-600 relative z-10">
-                                <TrendingUp className="w-8 h-8" />
-                            </div>
-                        </div>
-
-                        <div
-                            onClick={() => setShowDebtorsModal(true)}
-                            className="bg-white p-6 rounded-2xl shadow-sm border border-red-100 flex items-center justify-between cursor-pointer hover:shadow-md transition-shadow group relative overflow-hidden"
-                        >
-                            <div className="relative z-10">
-                                <p className="text-slate-500 text-sm font-medium mb-1 group-hover:text-red-600 transition-colors">Cobros Pendientes</p>
-                                <h3 className="text-3xl font-bold text-red-500">${stats.pendingDebt.toLocaleString()}</h3>
-                                <div className="flex items-center gap-1 text-xs text-red-400 mt-2 font-medium opacity-0 group-hover:opacity-100 transition-opacity">
-                                    Ver lista de deudores <ArrowRight className="w-3 h-3" />
-                                </div>
-                            </div>
-                            <div className="bg-red-50 p-3 rounded-xl text-red-500 group-hover:bg-red-100 transition-colors relative z-10">
-                                <AlertCircle className="w-8 h-8" />
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* --- GRÁFICO --- */}
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                        <h3 className="text-lg font-bold text-slate-800 mb-6">Evolución de Ingresos</h3>
-                        <div className="h-[300px] w-full">
-                            {chartData.length > 0 && chartData.some(d => d.amount > 0) ? (
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <AreaChart data={chartData}>
-                                        <defs>
-                                            <linearGradient id="colorIncome" x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="5%" stopColor="#10b981" stopOpacity={0.2} />
-                                                <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                                            </linearGradient>
-                                        </defs>
-                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                                        <XAxis
-                                            dataKey="day"
-                                            axisLine={false}
-                                            tickLine={false}
-                                            tick={{ fill: '#94a3b8', fontSize: 12 }}
-                                            tickFormatter={(val) => `Día ${val}`}
-                                        />
-                                        <YAxis
-                                            axisLine={false}
-                                            tickLine={false}
-                                            tick={{ fill: '#94a3b8', fontSize: 12 }}
-                                            tickFormatter={(val) => `$${val}`}
-                                        />
-                                        <Tooltip
-                                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                            cursor={{ stroke: '#10b981', strokeWidth: 2 }}
-                                        />
-                                        <Area
-                                            type="monotone"
-                                            dataKey="amount"
-                                            stroke="#10b981"
-                                            strokeWidth={3}
-                                            fillOpacity={1}
-                                            fill="url(#colorIncome)"
-                                        />
-                                    </AreaChart>
-                                </ResponsiveContainer>
-                            ) : (
-                                <div className="h-full flex flex-col items-center justify-center text-slate-400">
-                                    <TrendingUp className="w-12 h-12 mb-2 opacity-50" />
-                                    <p>Aún no hay suficientes datos de ingresos.</p>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* --- CALL TO ACTION --- */}
-                    <div className="bg-slate-900 rounded-2xl p-8 text-white relative overflow-hidden">
-                        <div className="relative z-10 max-w-lg">
-                            <h2 className="text-2xl font-bold mb-2">¿Listo para escalar?</h2>
-                            <p className="text-slate-400 mb-6">Mantené tus operaciones al día para ver el crecimiento real.</p>
-                            <button
-                                onClick={() => navigate('/admin/students')}
-                                className="bg-brand-500 hover:bg-brand-600 text-white px-6 py-2 rounded-lg font-medium transition-colors shadow-lg shadow-brand-500/20"
-                            >
-                                Ir a Gestión
-                            </button>
-                        </div>
-                        <div className="absolute top-0 right-0 w-64 h-64 bg-brand-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob"></div>
-                        <div className="absolute bottom-0 right-20 w-64 h-64 bg-purple-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob animation-delay-2000"></div>
+            <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm animate-in fade-in slide-in-from-bottom-8 delay-500 duration-700">
+                <div className="flex justify-between items-center mb-8">
+                    <div>
+                        <h2 className="text-xl font-bold text-slate-800">Evolución de Ingresos</h2>
+                        <p className="text-slate-500 text-sm">Últimos 7 días de facturación</p>
                     </div>
                 </div>
-            )}
+
+                <div className="h-[350px] w-full">
+                    {chartData.length > 0 && chartData.some(d => d.Ventas > 0) ? (
+                        <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                                <defs>
+                                    <linearGradient id="colorVentas" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.3} />
+                                        <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0} />
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                <XAxis
+                                    dataKey="name"
+                                    axisLine={false}
+                                    tickLine={false}
+                                    tick={{ fill: '#94a3b8', fontSize: 12 }}
+                                    dy={10}
+                                />
+                                <YAxis
+                                    axisLine={false}
+                                    tickLine={false}
+                                    tick={{ fill: '#94a3b8', fontSize: 12 }}
+                                    tickFormatter={(value) => `$${value}`}
+                                    dx={-10}
+                                />
+                                {/* ACÁ ESTÁ EL ARREGLO DE TYPESCRIPT */}
+                                <Tooltip
+                                    contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                                    formatter={(value: any) => [`$${Number(value || 0).toLocaleString()}`, 'Ingresos']}
+                                />
+                                <Area
+                                    type="monotone"
+                                    dataKey="Ventas"
+                                    stroke="#0ea5e9"
+                                    strokeWidth={4}
+                                    fillOpacity={1}
+                                    fill="url(#colorVentas)"
+                                    activeDot={{ r: 6, strokeWidth: 0, fill: '#0ea5e9' }}
+                                />
+                            </AreaChart>
+                        </ResponsiveContainer>
+                    ) : (
+                        <div className="h-full flex flex-col items-center justify-center text-slate-400">
+                            <TrendingUp className="w-12 h-12 mb-4 text-slate-200" />
+                            <p>Aún no hay suficientes datos de ingresos para esta semana.</p>
+                        </div>
+                    )}
+                </div>
+            </div>
         </div>
     );
 }

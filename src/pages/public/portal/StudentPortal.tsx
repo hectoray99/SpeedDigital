@@ -1,276 +1,184 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '../../../lib/supabase';
-import { LogOut, CheckCircle, AlertTriangle, Calendar, History, Receipt, Lock, Wallet } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { usePortalStore } from '../../../store/portalStore';
+import { motion } from 'framer-motion';
+import { 
+    LogOut, Calendar, User, 
+    Loader2, Receipt, Clock, FileText 
+} from 'lucide-react';
+import { toast } from 'sonner';
+
+// Definimos los tipos para TypeScript basados en tu BD
+interface StudentData {
+    full_name: string;
+    email: string;
+    identifier: string;
+}
 
 export default function StudentPortal() {
+    const { slug } = useParams();
     const navigate = useNavigate();
-    const [session, setSession] = useState<any>(null);
+    
+    // Traemos el cerebro de la sesión pública
+    const { studentId, orgSlug, logoutStudent } = usePortalStore();
 
-    const [debts, setDebts] = useState<any[]>([]);
-    const [history, setHistory] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [activeTab, setActiveTab] = useState<'pending' | 'history'>('pending');
+    const [student, setStudent] = useState<StudentData | null>(null);
+    const [isLoading, setIsLoading] = useState(true);
+    const [activeTab, setActiveTab] = useState<'turnos' | 'finanzas'>('turnos');
 
     useEffect(() => {
-        const sessionStr = localStorage.getItem('portal_token');
-        if (!sessionStr) {
-            navigate('/portal');
+        // 🔒 CANDADO DE SEGURIDAD: Si no hay sesión o quisieron cambiar la URL
+        if (!studentId || orgSlug !== slug) {
+            logoutStudent(); // Destruimos cualquier dato residual
+            navigate(`/portal/${slug}/login`, { replace: true });
             return;
         }
-        const sessionData = JSON.parse(sessionStr);
-        setSession(sessionData);
 
-        fetchData(sessionData.id);
-    }, [navigate]);
+        // Si la sesión es válida, traemos sus datos
+        fetchStudentData();
+    }, [studentId, orgSlug, slug, navigate]);
 
-    async function fetchData(personId: string) {
+    const fetchStudentData = async () => {
+        setIsLoading(true);
         try {
-            // 1. Buscar DEUDAS
-            const { data: pendingOps } = await supabase
-                .from('operations')
-                .select('id, total_amount, balance, created_at, metadata')
-                .eq('person_id', personId)
-                .gt('balance', 0)
-                .neq('status', 'cancelled')
-                .order('created_at', { ascending: true });
+            // Consultamos los datos básicos del alumno
+            const { data, error } = await supabase
+                .from('crm_people')
+                .select('full_name, email, identifier')
+                .eq('id', studentId)
+                .single();
 
-            if (pendingOps) setDebts(pendingOps);
+            if (error) throw error;
+            setStudent(data);
 
-            // 2. Buscar HISTORIAL
-            const { data: payments } = await supabase
-                .from('finance_ledger')
-                .select('id, amount, processed_at, payment_method, operations(metadata)')
-                .eq('person_id', personId)
-                .eq('type', 'income')
-                .order('processed_at', { ascending: false });
-
-            if (payments) setHistory(payments);
+            // ACA PODÉS AGREGAR LAS LLAMADAS A TUS OTRAS TABLAS:
+            // Ejemplo: fetchAppointments(), fetchOperations()...
 
         } catch (error) {
-            console.error(error);
+            console.error('Error al cargar el portal:', error);
+            toast.error('Hubo un problema al cargar tu información');
         } finally {
-            setLoading(false);
+            setIsLoading(false);
         }
-    }
-
-    const handleLogout = () => {
-        localStorage.removeItem('portal_token');
-        navigate('/portal');
     };
 
-    if (loading) return (
-        <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 gap-4">
-            <div className="w-12 h-12 border-4 border-brand-200 border-t-brand-600 rounded-full animate-spin"></div>
-            <p className="text-slate-400 font-medium animate-pulse">Cargando tu cuenta...</p>
-        </div>
-    );
+    const handleLogout = () => {
+        logoutStudent();
+        toast.success('Sesión cerrada correctamente');
+        navigate(`/portal/${slug}/login`, { replace: true });
+    };
 
-    if (!session) return null;
-
-    const totalDebt = debts.reduce((sum, d) => sum + d.balance, 0);
+    // Pantalla de carga mientras se verifica la seguridad
+    if (isLoading || !student) {
+        return (
+            <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center">
+                <Loader2 className="w-10 h-10 animate-spin text-brand-500 mb-4" />
+                <p className="text-slate-500 font-medium animate-pulse">Cargando tu portal...</p>
+            </div>
+        );
+    }
 
     return (
-        <div className="min-h-screen bg-slate-50 pb-20 font-sans">
-
-            {/* HEADER ANIMADO */}
-            <motion.header
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-                className="bg-gradient-to-r from-slate-900 to-slate-800 text-white p-6 pb-24 rounded-b-[2.5rem] shadow-2xl relative overflow-hidden"
-            >
-                <motion.div
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 50, repeat: Infinity, ease: "linear" }}
-                    className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -mr-16 -mt-16 blur-3xl"
-                />
-                <div className="absolute bottom-0 left-0 w-48 h-48 bg-brand-500/20 rounded-full -ml-10 -mb-10 blur-2xl"></div>
-
-                <div className="relative z-10 flex justify-between items-start mb-8">
-                    <div>
-                        <motion.div
-                            initial={{ x: -20, opacity: 0 }}
-                            animate={{ x: 0, opacity: 1 }}
-                            transition={{ delay: 0.2 }}
-                            className="flex items-center gap-2 mb-2 opacity-80"
+        <div className="min-h-screen bg-slate-50">
+            {/* Navbar del Portal */}
+            <nav className="bg-white shadow-sm border-b border-slate-200 sticky top-0 z-50">
+                <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+                    <div className="flex justify-between items-center h-16">
+                        <div className="flex items-center gap-3">
+                            <div className="bg-brand-100 p-2 rounded-lg text-brand-600">
+                                <User className="w-5 h-5" />
+                            </div>
+                            <div>
+                                <h1 className="text-lg font-bold text-slate-900 leading-tight">
+                                    Mi Portal
+                                </h1>
+                                <p className="text-xs text-slate-500 font-medium">
+                                    {slug?.toUpperCase()}
+                                </p>
+                            </div>
+                        </div>
+                        <button 
+                            onClick={handleLogout}
+                            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                         >
-                            <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
-                            <p className="text-xs font-bold uppercase tracking-widest">Portal de Cliente</p>
-                        </motion.div>
-                        <motion.h1
-                            initial={{ y: 20, opacity: 0 }}
-                            animate={{ y: 0, opacity: 1 }}
-                            transition={{ delay: 0.3 }}
-                            className="text-3xl font-bold tracking-tight"
-                        >
-                            Hola, {session.name.split(' ')[0]} 👋
-                        </motion.h1>
-                        <p className="text-sm text-slate-300 mt-1 opacity-90">{session.org_name}</p>
+                            <LogOut className="w-4 h-4" />
+                            <span className="hidden sm:inline">Cerrar Sesión</span>
+                        </button>
                     </div>
-                    <button onClick={handleLogout} className="bg-white/10 backdrop-blur-md p-3 rounded-xl hover:bg-white/20 transition-all active:scale-95 border border-white/10">
-                        <LogOut className="w-5 h-5" />
-                    </button>
                 </div>
-            </motion.header>
+            </nav>
 
-            {/* TARJETA DE ESTADO */}
-            <div className="px-4 -mt-20 relative z-20 mb-8">
-                <motion.div
-                    initial={{ y: 50, opacity: 0, scale: 0.9 }}
-                    animate={{ y: 0, opacity: 1, scale: 1 }}
-                    transition={{ delay: 0.4, type: "spring" }}
-                    className="bg-white rounded-3xl p-6 shadow-xl shadow-slate-200/50 border border-slate-100 flex items-center justify-between"
+            {/* Contenido Principal */}
+            <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                
+                {/* Cabecera de Bienvenida */}
+                <motion.div 
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-gradient-to-br from-brand-600 to-indigo-700 rounded-3xl p-8 text-white shadow-xl shadow-indigo-900/10 mb-8 relative overflow-hidden"
                 >
-                    <div>
-                        <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">Tu Saldo Pendiente</p>
-                        <h2 className={`text-4xl font-black ${totalDebt > 0 ? 'text-slate-900' : 'text-emerald-500'}`}>
-                            ${totalDebt.toLocaleString()}
+                    <div className="relative z-10">
+                        <h2 className="text-3xl font-bold mb-2">
+                            ¡Hola, {student.full_name.split(' ')[0]}! 👋
                         </h2>
+                        <p className="text-white/80 text-lg">
+                            DNI: {student.identifier} • {student.email}
+                        </p>
                     </div>
-                    <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-2xl shadow-lg transform rotate-3 ${totalDebt > 0 ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'}`}>
-                        {totalDebt > 0 ? <AlertTriangle className="w-7 h-7" /> : <CheckCircle className="w-7 h-7" />}
-                    </div>
+                    {/* Elemento decorativo de fondo */}
+                    <div className="absolute -right-10 -top-10 w-64 h-64 bg-white/10 rounded-full blur-3xl"></div>
                 </motion.div>
-            </div>
 
-            {/* CONTENIDO */}
-            <div className="px-4 max-w-3xl mx-auto">
-                <div className="flex bg-white p-1.5 rounded-2xl shadow-sm border border-slate-100 mb-6 sticky top-4 z-30">
+                {/* Navegación por Pestañas */}
+                <div className="flex gap-4 mb-6 border-b border-slate-200">
                     <button
-                        onClick={() => setActiveTab('pending')}
-                        className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all flex items-center justify-center gap-2 relative ${activeTab === 'pending' ? 'text-white' : 'text-slate-500 hover:bg-slate-50'}`}
+                        onClick={() => setActiveTab('turnos')}
+                        className={`pb-4 px-4 font-bold text-sm transition-all flex items-center gap-2 border-b-2 ${
+                            activeTab === 'turnos' 
+                                ? 'border-brand-500 text-brand-600' 
+                                : 'border-transparent text-slate-500 hover:text-slate-700'
+                        }`}
                     >
-                        {activeTab === 'pending' && (
-                            <motion.div
-                                layoutId="activeTab"
-                                className="absolute inset-0 bg-slate-900 rounded-xl"
-                            />
-                        )}
-                        <span className="relative z-10 flex items-center gap-2">
-                            <Wallet className="w-4 h-4" /> Pendientes
-                            {debts.length > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{debts.length}</span>}
-                        </span>
+                        <Calendar className="w-4 h-4" /> Mis Turnos
                     </button>
                     <button
-                        onClick={() => setActiveTab('history')}
-                        className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all flex items-center justify-center gap-2 relative ${activeTab === 'history' ? 'text-white' : 'text-slate-500 hover:bg-slate-50'}`}
+                        onClick={() => setActiveTab('finanzas')}
+                        className={`pb-4 px-4 font-bold text-sm transition-all flex items-center gap-2 border-b-2 ${
+                            activeTab === 'finanzas' 
+                                ? 'border-brand-500 text-brand-600' 
+                                : 'border-transparent text-slate-500 hover:text-slate-700'
+                        }`}
                     >
-                        {activeTab === 'history' && (
-                            <motion.div
-                                layoutId="activeTab"
-                                className="absolute inset-0 bg-slate-900 rounded-xl"
-                            />
-                        )}
-                        <span className="relative z-10 flex items-center gap-2">
-                            <History className="w-4 h-4" /> Historial
-                        </span>
+                        <Receipt className="w-4 h-4" /> Estado de Cuenta
                     </button>
                 </div>
 
-                <div className="space-y-4 pb-12">
-                    <AnimatePresence mode="wait">
-                        {activeTab === 'pending' ? (
-                            <motion.div
-                                key="pending"
-                                initial={{ opacity: 0, x: -20 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                exit={{ opacity: 0, x: 20 }}
-                                transition={{ duration: 0.2 }}
-                            >
-                                {debts.length === 0 ? (
-                                    <div className="text-center py-16 px-6 bg-white rounded-3xl border border-slate-100 border-dashed">
-                                        <motion.div
-                                            animate={{ y: [0, -10, 0] }}
-                                            transition={{ repeat: Infinity, duration: 2 }}
-                                            className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-4"
-                                        >
-                                            <CheckCircle className="w-10 h-10 text-emerald-500" />
-                                        </motion.div>
-                                        <h3 className="text-xl font-bold text-slate-900">¡Estás al día!</h3>
-                                        <p className="text-slate-500 mt-2 text-sm">No tenés pagos pendientes por ahora.</p>
-                                    </div>
-                                ) : (
-                                    debts.map((item, i) => (
-                                        <motion.div
-                                            key={item.id}
-                                            initial={{ opacity: 0, y: 20 }}
-                                            animate={{ opacity: 1, y: 0 }}
-                                            transition={{ delay: i * 0.1 }}
-                                            className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow flex justify-between items-center group"
-                                        >
-                                            <div className="flex items-center gap-4">
-                                                <div className="bg-red-50 w-12 h-12 rounded-xl flex items-center justify-center text-red-500 shrink-0 group-hover:scale-110 transition-transform">
-                                                    <Calendar className="w-6 h-6" />
-                                                </div>
-                                                <div>
-                                                    <p className="font-bold text-slate-800 text-lg leading-tight">
-                                                        {item.metadata?.concept || 'Cuota / Servicio'}
-                                                    </p>
-                                                    <p className="text-xs text-red-500 font-bold mt-1 uppercase tracking-wide">
-                                                        Vence: {new Date(item.created_at).toLocaleDateString()}
-                                                    </p>
-                                                </div>
-                                            </div>
-                                            <div className="text-right">
-                                                <span className="block font-black text-slate-900 text-xl">${item.balance.toLocaleString()}</span>
-                                                <span className="text-xs text-slate-400 font-medium">Pendiente</span>
-                                            </div>
-                                        </motion.div>
-                                    ))
-                                )}
-                            </motion.div>
-                        ) : (
-                            <motion.div
-                                key="history"
-                                initial={{ opacity: 0, x: 20 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                exit={{ opacity: 0, x: -20 }}
-                                transition={{ duration: 0.2 }}
-                                className="space-y-3"
-                            >
-                                {history.length === 0 ? (
-                                    <div className="text-center py-16 px-6 opacity-60">
-                                        <History className="w-12 h-12 mx-auto text-slate-400 mb-2" />
-                                        <p>Aún no tenés historial de pagos.</p>
-                                    </div>
-                                ) : (
-                                    history.map((item, i) => (
-                                        <motion.div
-                                            key={item.id}
-                                            initial={{ opacity: 0, y: 20 }}
-                                            animate={{ opacity: 1, y: 0 }}
-                                            transition={{ delay: i * 0.05 }}
-                                            className="bg-white p-4 rounded-2xl border border-slate-100 flex justify-between items-center opacity-75 hover:opacity-100 transition-opacity"
-                                        >
-                                            <div className="flex items-center gap-4">
-                                                <div className="bg-emerald-50 w-10 h-10 rounded-xl flex items-center justify-center text-emerald-600 shrink-0">
-                                                    <Receipt className="w-5 h-5" />
-                                                </div>
-                                                <div>
-                                                    <p className="font-bold text-slate-700">Pago Recibido</p>
-                                                    <p className="text-xs text-emerald-600 font-medium">
-                                                        {new Date(item.processed_at).toLocaleDateString()} • {item.payment_method}
-                                                    </p>
-                                                </div>
-                                            </div>
-                                            <span className="font-bold text-slate-500 line-through decoration-slate-300 decoration-2 text-lg">
-                                                ${item.amount.toLocaleString()}
-                                            </span>
-                                        </motion.div>
-                                    ))
-                                )}
-                            </motion.div>
-                        )}
-                    </AnimatePresence>
-                </div>
-            </div>
+                {/* Área dinámica según la pestaña seleccionada */}
+                <motion.div 
+                    key={activeTab}
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ duration: 0.3 }}
+                >
+                    {activeTab === 'turnos' ? (
+                        <div className="bg-white rounded-2xl p-8 border border-slate-100 shadow-sm text-center">
+                            <Clock className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+                            <h3 className="text-lg font-bold text-slate-700">No hay próximos turnos</h3>
+                            <p className="text-slate-500 mt-2">Aún no tenés reservas activas en tu agenda.</p>
+                            {/* Acá podés mapear tus turnos reales en el futuro */}
+                        </div>
+                    ) : (
+                        <div className="bg-white rounded-2xl p-8 border border-slate-100 shadow-sm text-center">
+                            <FileText className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+                            <h3 className="text-lg font-bold text-slate-700">Al día</h3>
+                            <p className="text-slate-500 mt-2">No registramos deuda en tu estado de cuenta.</p>
+                            {/* Acá podés mapear tus operations/finance reales en el futuro */}
+                        </div>
+                    )}
+                </motion.div>
 
-            <div className="text-center text-slate-400 text-xs py-6">
-                <Lock className="w-3 h-3 inline-block mr-1 mb-0.5" />
-                Portal Seguro v2.0
-            </div>
+            </main>
         </div>
     );
 }

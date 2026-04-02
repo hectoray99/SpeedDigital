@@ -1,188 +1,162 @@
-import { Fragment, useState, useEffect } from 'react';
-import { Dialog, Transition } from '@headlessui/react';
-import { X, Loader2, Save } from 'lucide-react';
+import { useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { useAuthStore } from '../store/authStore';
 import { toast } from 'sonner';
+import { motion, AnimatePresence } from 'framer-motion';
+import { X, User, Mail, Hash, Loader2, Phone } from 'lucide-react';
 
 interface CreateStudentModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onSuccess: () => void;
+    onSuccess: () => void; // Función para recargar la tabla de alumnos
 }
 
 export default function CreateStudentModal({ isOpen, onClose, onSuccess }: CreateStudentModalProps) {
-    const [loading, setLoading] = useState(false);
+    const { orgData } = useAuthStore(); // El ID de la organización ya está en memoria
+
     const [formData, setFormData] = useState({
         full_name: '',
-        identifier: '', // DNI
+        identifier: '',
         email: '',
-        phone: '',
-        type: 'client' // Por defecto cliente
+        phone: ''
     });
-
-    // Limpiar formulario al abrir
-    useEffect(() => {
-        if (isOpen) {
-            setFormData({
-                full_name: '',
-                identifier: '',
-                email: '',
-                phone: '',
-                type: 'client'
-            });
-        }
-    }, [isOpen]);
+    const [isLoading, setIsLoading] = useState(false);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        setLoading(true);
+        if (!orgData?.id) return;
+
+        setIsLoading(true);
 
         try {
-            // 1. Obtener mi Organization ID
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) throw new Error('No usuario autenticado');
-
-            const { data: profile } = await supabase
-                .from('profiles')
-                .select('organization_id')
-                .eq('id', user.id)
-                .single();
-
-            if (!profile?.organization_id) throw new Error('No tienes organización asignada');
-
-            // 2. Insertar en crm_people
             const { error } = await supabase
                 .from('crm_people')
                 .insert([{
-                    organization_id: profile.organization_id,
+                    organization_id: orgData.id, // Inyectamos el tenant directamente
                     full_name: formData.full_name,
                     identifier: formData.identifier,
                     email: formData.email,
                     phone: formData.phone,
-                    type: formData.type,
-                    is_active: true
+                    type: 'client', // Por defecto es cliente/alumno
+                    portal_password: formData.identifier // Por defecto el DNI es la pass
                 }]);
 
             if (error) throw error;
 
-            toast.success('Persona registrada correctamente');
+            toast.success('Alumno registrado correctamente');
+
+            // Limpiamos formulario, cerramos y avisamos al componente padre
+            setFormData({ full_name: '', identifier: '', email: '', phone: '' });
             onSuccess();
             onClose();
 
-        } catch (error: any) {
-            console.error(error);
-            toast.error('Error al guardar: ' + error.message);
+        } catch (error) {
+            console.error('Error al crear alumno:', error);
+            toast.error('Hubo un error al registrar al alumno');
         } finally {
-            setLoading(false);
+            setIsLoading(false);
         }
     };
 
+    if (!isOpen) return null;
+
     return (
-        <Transition appear show={isOpen} as={Fragment}>
-            <Dialog as="div" className="relative z-50" onClose={onClose}>
-                <Transition.Child
-                    as={Fragment}
-                    enter="ease-out duration-300"
-                    enterFrom="opacity-0"
-                    enterTo="opacity-100"
-                    leave="ease-in duration-200"
-                    leaveFrom="opacity-100"
-                    leaveTo="opacity-0"
+        <AnimatePresence>
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+                <motion.div
+                    initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                    className="bg-white rounded-3xl shadow-xl w-full max-w-md overflow-hidden relative"
                 >
-                    <div className="fixed inset-0 bg-slate-900/25 backdrop-blur-sm" />
-                </Transition.Child>
-
-                <div className="fixed inset-0 overflow-y-auto">
-                    <div className="flex min-h-full items-center justify-center p-4 text-center">
-                        <Transition.Child
-                            as={Fragment}
-                            enter="ease-out duration-300"
-                            enterFrom="opacity-0 scale-95"
-                            enterTo="opacity-100 scale-100"
-                            leave="ease-in duration-200"
-                            leaveFrom="opacity-100 scale-100"
-                            leaveTo="opacity-0 scale-95"
+                    {/* Header */}
+                    <div className="flex justify-between items-center p-6 border-b border-slate-100">
+                        <h3 className="text-xl font-bold text-slate-800">Nuevo Alumno</h3>
+                        <button
+                            onClick={onClose}
+                            className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-colors"
                         >
-                            <Dialog.Panel className="w-full max-w-md transform overflow-hidden rounded-2xl bg-white p-6 text-left align-middle shadow-xl transition-all">
-                                <div className="flex justify-between items-center mb-6">
-                                    <Dialog.Title as="h3" className="text-lg font-bold text-slate-900">
-                                        Nueva Persona
-                                    </Dialog.Title>
-                                    <button onClick={onClose} className="text-slate-400 hover:text-slate-500">
-                                        <X className="w-5 h-5" />
-                                    </button>
-                                </div>
-
-                                <form onSubmit={handleSubmit} className="space-y-4">
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Nombre Completo *</label>
-                                        <input
-                                            required
-                                            type="text"
-                                            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none transition-all"
-                                            value={formData.full_name}
-                                            onChange={e => setFormData({ ...formData, full_name: e.target.value })}
-                                            placeholder="Ej: Juan Pérez"
-                                        />
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Identificador (DNI/CUIT)</label>
-                                        <input
-                                            type="text"
-                                            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none transition-all"
-                                            value={formData.identifier}
-                                            onChange={e => setFormData({ ...formData, identifier: e.target.value })}
-                                            placeholder="Opcional"
-                                        />
-                                    </div>
-
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
-                                            <input
-                                                type="email"
-                                                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none transition-all"
-                                                value={formData.email}
-                                                onChange={e => setFormData({ ...formData, email: e.target.value })}
-                                                placeholder="juan@mail.com"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-sm font-medium text-slate-700 mb-1">Teléfono</label>
-                                            <input
-                                                type="tel"
-                                                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none transition-all"
-                                                value={formData.phone}
-                                                onChange={e => setFormData({ ...formData, phone: e.target.value })}
-                                                placeholder="3704..."
-                                            />
-                                        </div>
-                                    </div>
-
-                                    <div className="pt-4 flex justify-end gap-3">
-                                        <button
-                                            type="button"
-                                            onClick={onClose}
-                                            className="px-4 py-2 text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg font-medium transition-colors"
-                                        >
-                                            Cancelar
-                                        </button>
-                                        <button
-                                            type="submit"
-                                            disabled={loading}
-                                            className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
-                                        >
-                                            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                                            Guardar
-                                        </button>
-                                    </div>
-                                </form>
-                            </Dialog.Panel>
-                        </Transition.Child>
+                            <X className="w-5 h-5" />
+                        </button>
                     </div>
-                </div>
-            </Dialog>
-        </Transition>
+
+                    {/* Formulario */}
+                    <form onSubmit={handleSubmit} className="p-6 space-y-4">
+
+                        <div>
+                            <label className="block text-sm font-bold text-slate-700 mb-1 ml-1">Nombre Completo</label>
+                            <div className="relative">
+                                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                                <input
+                                    type="text"
+                                    required
+                                    className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none transition-all font-medium"
+                                    value={formData.full_name}
+                                    onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
+                                />
+                            </div>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-bold text-slate-700 mb-1 ml-1">DNI / Identificación</label>
+                            <div className="relative">
+                                <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                                <input
+                                    type="text"
+                                    required
+                                    className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none transition-all font-medium"
+                                    value={formData.identifier}
+                                    onChange={(e) => setFormData({ ...formData, identifier: e.target.value })}
+                                />
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 mb-1 ml-1">Email</label>
+                                <div className="relative">
+                                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                                    <input
+                                        type="email"
+                                        className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none transition-all font-medium text-sm"
+                                        value={formData.email}
+                                        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                                    />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 mb-1 ml-1">Teléfono</label>
+                                <div className="relative">
+                                    <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                                    <input
+                                        type="text"
+                                        className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none transition-all font-medium text-sm"
+                                        value={formData.phone}
+                                        onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="pt-4 flex gap-3">
+                            <button
+                                type="button"
+                                onClick={onClose}
+                                className="flex-1 py-3 px-4 bg-white border border-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-50 transition-colors"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                type="submit"
+                                disabled={isLoading}
+                                className="flex-1 py-3 px-4 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl transition-colors flex items-center justify-center gap-2 disabled:opacity-70"
+                            >
+                                {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Guardar Alumno'}
+                            </button>
+                        </div>
+                    </form>
+                </motion.div>
+            </div>
+        </AnimatePresence>
     );
 }

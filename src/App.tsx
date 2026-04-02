@@ -7,6 +7,8 @@ import Login from './pages/public/login/Login';
 import AuthCallback from './pages/public/auth/AuthCallback';
 import StudentLogin from './pages/public/portal/StudentLogin';
 import StudentPortal from './pages/public/portal/StudentPortal';
+import DigitalMenu from './pages/public/menu/DigitalMenu';
+import StaffLogin from './pages/public/login/StaffLogin';
 
 // Páginas Privadas (Admin)
 import Dashboard from './pages/admin/dashboard/Dashboard';
@@ -15,6 +17,11 @@ import StudentDetail from './pages/admin/students/StudentDetail';
 import Products from './pages/admin/products/Products';
 import Finance from './pages/admin/finance/Finance';
 import Settings from './pages/admin/settings/Settings';
+import PublicRouter from './pages/public/portal/PublicRouter';
+import Staff from './pages/admin/staff/Staff';
+import Salon from './pages/admin/salon/Salon';
+import Kitchen from './pages/admin/kitchen/Kitchen';
+import CashRegister from './pages/admin/finance/CashRegister';
 
 // Seguridad y Layout
 import AuthGuard from './components/AuthGuard';
@@ -31,6 +38,13 @@ function App() {
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
         <Route path="/auth/callback" element={<AuthCallback />} />
+        <Route path="/m/:slug" element={<DigitalMenu />} />
+
+        {/* NUEVA RUTA: ACCESO PARA EL STAFF DEL LOCAL */}
+        <Route path="/equipo/:slug" element={<StaffLogin />} />
+
+        {/* NUEVA RUTA DINÁMICA POR SLUG */}
+        <Route path="/p/:slug" element={<PublicRouter />} />
 
         {/* PORTAL ALUMNOS */}
         <Route path="/portal" element={<StudentLogin />} />
@@ -44,10 +58,16 @@ function App() {
           <Route path="/admin/students" element={<Students />} />
           <Route path="/admin/students/:id" element={<StudentDetail />} />
 
+          <Route path="/admin/salon" element={<Salon />} />
+          <Route path="/admin/kitchen" element={<Kitchen />} />
+
           {/* Rutas de Gestión */}
           <Route path="/admin/products" element={<Products />} />
           <Route path="/admin/finance" element={<Finance />} />
           <Route path="/admin/settings" element={<Settings />} />
+          <Route path="/admin/caja" element={<CashRegister />} />
+          <Route path="/admin/staff" element={<Staff />} />
+          
         </Route>
 
         {/* Cualquier ruta desconocida te manda a la Home */}
