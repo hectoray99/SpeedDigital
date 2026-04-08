@@ -6,28 +6,48 @@ import { useAuthStore } from '../../../store/authStore';
 
 export default function AuthCallback() {
     const navigate = useNavigate();
-    const { initializeAuth } = useAuthStore(); // Traemos nuestro cerebro central
+    const { initializeAuth } = useAuthStore(); 
 
     useEffect(() => {
-        // Esta es la forma oficial y segura de escuchar a Google OAuth
+        let isMounted = true;
+
+        const processAuth = async () => {
+            try {
+                // 1. CHEQUEO ACTIVO: Verificamos si la sesión ya se armó en la URL
+                const { data: { session }, error } = await supabase.auth.getSession();
+                
+                if (error) throw error;
+
+                if (session) {
+                    await initializeAuth();
+                    if (isMounted) navigate('/admin/dashboard', { replace: true });
+                }
+            } catch (error) {
+                console.error("Error en AuthCallback:", error);
+                if (isMounted) navigate('/login', { replace: true });
+            }
+        };
+
+        // Ejecutamos el chequeo activo apenas carga
+        processAuth();
+
+        // 2. LISTENER PASIVO: Por si el chequeo activo fue muy rápido y la red está lenta
         const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
             if (event === 'SIGNED_IN' && session) {
                 try {
-                    // Forzamos al cerebro a cargar los datos (con los reintentos que le programamos)
                     await initializeAuth();
-                    // Una vez cargado, lo mandamos al Dashboard
-                    navigate('/admin/dashboard', { replace: true });
+                    if (isMounted) navigate('/admin/dashboard', { replace: true });
                 } catch (error) {
                     console.error("Error cargando perfil post-Google:", error);
-                    navigate('/login', { replace: true });
+                    if (isMounted) navigate('/login', { replace: true });
                 }
             } else if (event === 'SIGNED_OUT') {
-                navigate('/login', { replace: true });
+                if (isMounted) navigate('/login', { replace: true });
             }
         });
 
-        // Limpieza del listener cuando el componente muere
         return () => {
+            isMounted = false;
             authListener.subscription.unsubscribe();
         };
     }, [navigate, initializeAuth]);

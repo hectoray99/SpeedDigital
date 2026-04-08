@@ -1,80 +1,110 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { Toaster } from 'sonner';
 
-// Páginas Públicas
-import Landing from './pages/public/landing/Landing';
-import Login from './pages/public/login/Login';
-import AuthCallback from './pages/public/auth/AuthCallback';
-import StudentLogin from './pages/public/portal/StudentLogin';
-import StudentPortal from './pages/public/portal/StudentPortal';
-import DigitalMenu from './pages/public/menu/DigitalMenu';
-import StaffLogin from './pages/public/login/StaffLogin';
-
-// Páginas Privadas (Admin)
-import Dashboard from './pages/admin/dashboard/Dashboard';
-import Students from './pages/admin/students/Students';
-import StudentDetail from './pages/admin/students/StudentDetail';
-import Products from './pages/admin/products/Products';
-import Finance from './pages/admin/finance/Finance';
-import Settings from './pages/admin/settings/Settings';
-import PublicRouter from './pages/public/portal/PublicRouter';
-import Staff from './pages/admin/staff/Staff';
-import Salon from './pages/admin/salon/Salon';
-import Kitchen from './pages/admin/kitchen/Kitchen';
-import CashRegister from './pages/admin/finance/CashRegister';
-
-// Seguridad y Layout
+// ==========================================
+// 1. SEGURIDAD Y LAYOUTS
+// ==========================================
 import AuthGuard from './components/AuthGuard';
 import MainLayout from './components/layout/MainLayout';
 
-function App() {
+// ==========================================
+// 2. PÁGINAS PÚBLICAS (Sin sesión requerida)
+// ==========================================
+import Landing from './pages/public/landing/Landing';
+import Login from './pages/public/login/Login';
+import AuthCallback from './pages/public/auth/AuthCallback';
+import StaffLogin from './pages/public/login/StaffLogin';
+import DigitalMenu from './pages/public/menu/DigitalMenu';
+import PublicRouter from './pages/public/portal/PublicRouter';
+import StudentLogin from './pages/public/portal/StudentLogin';
+import StudentPortal from './pages/public/portal/StudentPortal';
+
+// ==========================================
+// 3. PÁGINAS PRIVADAS (Solo administradores)
+// ==========================================
+import Onboarding from './pages/admin/Onboarding'; 
+import Dashboard from './pages/admin/dashboard/Dashboard';
+import Salon from './pages/admin/salon/Salon';
+import Kitchen from './pages/admin/kitchen/Kitchen';
+import CashRegister from './pages/admin/finance/CashRegister';
+import Products from './pages/admin/products/Products';
+import Finance from './pages/admin/finance/Finance';
+import Staff from './pages/admin/staff/Staff';
+import Students from './pages/admin/students/Students';
+import StudentDetail from './pages/admin/students/StudentDetail';
+import Settings from './pages/admin/settings/Settings';
+import Agenda from './pages/admin/services/Agenda';
+
+// --> ACÁ IMPORTAMOS EL GESTOR DE CANCHAS/AGENDAS NUEVO <--
+import Resources from './pages/admin/services/Resources'; 
+
+export default function App() {
   return (
     <BrowserRouter>
-      {/* Notificaciones Globales */}
+      {/* Notificaciones Globales de la App */}
       <Toaster position="top-center" richColors />
 
       <Routes>
-        {/* --- ZONA PÚBLICA --- */}
+        
+        {/* =========================================
+            ZONA PÚBLICA (Acceso libre)
+        ========================================= */}
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
         <Route path="/auth/callback" element={<AuthCallback />} />
+        
+        {/* Accesos de clientes y staff basados en el nombre del local (Slug) */}
         <Route path="/m/:slug" element={<DigitalMenu />} />
-
-        {/* NUEVA RUTA: ACCESO PARA EL STAFF DEL LOCAL */}
         <Route path="/equipo/:slug" element={<StaffLogin />} />
-
-        {/* NUEVA RUTA DINÁMICA POR SLUG */}
         <Route path="/p/:slug" element={<PublicRouter />} />
 
-        {/* PORTAL ALUMNOS */}
+        {/* Portal exclusivo para alumnos (Academias) */}
         <Route path="/portal" element={<StudentLogin />} />
         <Route path="/portal/dashboard" element={<StudentPortal />} />
 
-        {/* --- ZONA PRIVADA (Protegida por AuthGuard) --- */}
-        <Route element={<AuthGuard><MainLayout /></AuthGuard>}>
-          <Route path="/admin/dashboard" element={<Dashboard />} />
 
-          {/* Rutas de Alumnos */}
-          <Route path="/admin/students" element={<Students />} />
-          <Route path="/admin/students/:id" element={<StudentDetail />} />
-
-          <Route path="/admin/salon" element={<Salon />} />
-          <Route path="/admin/kitchen" element={<Kitchen />} />
-
-          {/* Rutas de Gestión */}
-          <Route path="/admin/products" element={<Products />} />
-          <Route path="/admin/finance" element={<Finance />} />
-          <Route path="/admin/settings" element={<Settings />} />
-          <Route path="/admin/caja" element={<CashRegister />} />
-          <Route path="/admin/staff" element={<Staff />} />
+        {/* =========================================
+            ZONA PRIVADA (El "Patovica" AuthGuard vigila acá)
+        ========================================= */}
+        <Route element={<AuthGuard><Outlet /></AuthGuard>}>
           
+          <Route path="/onboarding" element={<Onboarding />} />
+
+          <Route element={<MainLayout />}>
+            
+            <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
+            <Route path="/admin/dashboard" element={<Dashboard />} />
+
+            {/* Módulo: Gastronomía */}
+            <Route path="/admin/salon" element={<Salon />} />
+            <Route path="/admin/kitchen" element={<Kitchen />} />
+            <Route path="/admin/caja" element={<CashRegister />} />
+            <Route path="/admin/products" element={<Products />} />
+
+            {/* Módulo: Academias */}
+            <Route path="/admin/students" element={<Students />} />
+            <Route path="/admin/students/:id" element={<StudentDetail />} />
+
+            {/* Módulo: Administración General */}
+            <Route path="/admin/staff" element={<Staff />} />
+            <Route path="/admin/finance" element={<Finance />} />
+            <Route path="/admin/settings" element={<Settings />} />
+            
+            {/* Módulo: Servicios y Gym (Agenda y Canchas) */}
+            <Route path="/admin/agenda" element={<Agenda />} />
+            {/* --> ACÁ AGREGAMOS LA RUTA NUEVA <-- */}
+            <Route path="/admin/resources" element={<Resources />} />
+
+          </Route>
         </Route>
 
-        {/* Cualquier ruta desconocida te manda a la Home */}
+
+        {/* =========================================
+            RUTAS NO ENCONTRADAS (Catch-all)
+        ========================================= */}
         <Route path="*" element={<Navigate to="/" replace />} />
+        
       </Routes>
     </BrowserRouter>
   );
 }
-
-export default App;

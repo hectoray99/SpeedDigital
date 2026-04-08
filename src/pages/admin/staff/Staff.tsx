@@ -2,15 +2,23 @@ import { useEffect, useState, Fragment } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { useAuthStore } from '../../../store/authStore';
 import { Dialog, Transition } from '@headlessui/react';
-import { Plus, Users, Loader2, X, UserCircle, Shield, Key, Mail, Trash2 } from 'lucide-react';
+import { Plus, Users, Loader2, X, UserCircle, Shield, Key, Mail, Trash2, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 import { createClient } from '@supabase/supabase-js';
+import ScheduleManager from './ScheduleManager'; // Nuestro nuevo componente de globitos
 
 export default function Staff() {
     const { orgData, userRole, user } = useAuthStore();
     const [staffList, setStaffList] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
+    
+    // Controles de Modales
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
+    
+    // Estados para vincular horarios
+    const [selectedResource, setSelectedResource] = useState<{id: string, name: string} | null>(null);
+    const [isLinkingResource, setIsLinkingResource] = useState(false);
 
     const [formData, setFormData] = useState({ name: '', email: '', password: '', role: 'staff' });
     const [isCreating, setIsCreating] = useState(false);
@@ -63,7 +71,6 @@ export default function Staff() {
 
             await new Promise(resolve => setTimeout(resolve, 1000));
 
-            // FORZAMOS LA INYECCIÓN DEL NOMBRE Y EL EMAIL EN EL PERFIL
             await supabase
                 .from('profiles')
                 .update({ 
@@ -97,10 +104,7 @@ export default function Staff() {
     };
 
     const handleRemoveStaff = async (profileId: string, profileName: string) => {
-        if (profileId === user?.id) {
-            return toast.error("No puedes eliminar tu propia cuenta.");
-        }
-
+        if (profileId === user?.id) return toast.error("No puedes eliminar tu propia cuenta.");
         if (!confirm(`¿Estás seguro de que deseas quitar el acceso a ${profileName}?`)) return;
 
         try {
@@ -119,8 +123,54 @@ export default function Staff() {
         }
     };
 
+    // LÓGICA PARA SERVICIOS: Crea el recurso si no existe y abre el panel de horarios
+    const handleOpenSchedule = async (profileName: string) => {
+        if (!orgData?.id) return;
+        setIsLinkingResource(true);
+
+        try {
+            const { data: existingResource } = await supabase
+                .from('resources')
+                .select('id, name')
+                .eq('organization_id', orgData.id)
+                .eq('name', profileName)
+                .maybeSingle();
+
+            if (existingResource) {
+                setSelectedResource(existingResource);
+            } else {
+                const { data: newResource, error } = await supabase
+                    .from('resources')
+                    .insert([{
+                        organization_id: orgData.id,
+                        name: profileName,
+                        capacity: 1,
+                        availability_rules: {
+                            '1': [{ start: '09:00', end: '18:00' }],
+                            '2': [{ start: '09:00', end: '18:00' }],
+                            '3': [{ start: '09:00', end: '18:00' }],
+                            '4': [{ start: '09:00', end: '18:00' }],
+                            '5': [{ start: '09:00', end: '18:00' }]
+                        }
+                    }])
+                    .select('id, name')
+                    .single();
+
+                if (error) throw error;
+                setSelectedResource(newResource);
+            }
+
+            setIsScheduleModalOpen(true);
+        } catch (error) {
+            console.error(error);
+            toast.error('Error al vincular la agenda');
+        } finally {
+            setIsLinkingResource(false);
+        }
+    };
+
     return (
-        <div className="pb-12 max-w-7xl mx-auto">
+        <div className="pb-12 max-w-7xl mx-auto relative">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
                 <div>
                     <h1 className="text-3xl font-black text-slate-800 tracking-tight">Personal</h1>
@@ -139,7 +189,6 @@ export default function Staff() {
                 </div>
             ) : (
                 <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
-                    {/* CONTENEDOR RESPONSIVE PARA LA TABLA */}
                     <div className="overflow-x-auto">
                         <table className="w-full text-left border-collapse min-w-[650px]">
                             <thead>
@@ -185,15 +234,31 @@ export default function Staff() {
                                                 {new Date(member.created_at).toLocaleDateString()}
                                             </td>
                                             <td className="p-4 border-b border-slate-50 text-right">
-                                                {isOwnerOrAdmin && !isMe && (
-                                                    <button 
-                                                        onClick={() => handleRemoveStaff(member.profile_id, profileName)}
-                                                        className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                                        title="Quitar acceso"
-                                                    >
-                                                        <Trash2 className="w-5 h-5" />
-                                                    </button>
-                                                )}
+                                                <div className="flex items-center justify-end gap-2">
+                                                    
+                                                    {/* ACÁ ESTÁ EL BLINDAJE: Solo Gym y Servicios ven este botón */}
+                                                    {(orgData?.industry === 'services' || orgData?.industry === 'gym') && (
+                                                        <button 
+                                                            onClick={() => handleOpenSchedule(profileName)}
+                                                            disabled={isLinkingResource}
+                                                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-brand-600 bg-brand-50 hover:bg-brand-100 rounded-lg transition-colors"
+                                                            title="Configurar agenda y turnos"
+                                                        >
+                                                            {isLinkingResource ? <Loader2 className="w-4 h-4 animate-spin" /> : <Clock className="w-4 h-4" />}
+                                                            Horarios
+                                                        </button>
+                                                    )}
+
+                                                    {isOwnerOrAdmin && !isMe && (
+                                                        <button 
+                                                            onClick={() => handleRemoveStaff(member.profile_id, profileName)}
+                                                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                                            title="Quitar acceso"
+                                                        >
+                                                            <Trash2 className="w-5 h-5" />
+                                                        </button>
+                                                    )}
+                                                </div>
                                             </td>
                                         </tr>
                                     );
@@ -204,7 +269,7 @@ export default function Staff() {
                 </div>
             )}
 
-            {/* MODAL (Sin cambios, funciona perfecto) */}
+            {/* MODAL CREAR USUARIO */}
             <Transition appear show={isModalOpen} as={Fragment}>
                 <Dialog as="div" className="relative z-50" onClose={() => setIsModalOpen(false)}>
                     <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm" />
@@ -218,39 +283,33 @@ export default function Staff() {
                                     </Dialog.Title>
                                     <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors"><X className="w-5 h-5 text-slate-500" /></button>
                                 </div>
-
                                 <form onSubmit={handleCreateStaff} className="p-6 space-y-4">
                                     <div className="bg-blue-50 text-blue-700 p-4 rounded-xl text-sm mb-4">
                                         Se creará un usuario real. Podrá iniciar sesión con el correo y contraseña que definas aquí.
                                     </div>
-                                    
                                     <div>
                                         <label className="block text-sm font-bold text-slate-700 mb-1">Nombre Completo</label>
                                         <input required type="text" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-brand-500/20" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} placeholder="Ej: Marcos Mozo" />
                                     </div>
-
                                     <div>
                                         <label className="flex items-center gap-1 text-sm font-bold text-slate-700 mb-1"><Mail className="w-4 h-4" /> Correo Electrónico (Usuario)</label>
                                         <input required type="email" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-brand-500/20" value={formData.email} onChange={e => setFormData({ ...formData, email: e.target.value })} placeholder="marcos@tudominio.com" />
                                     </div>
-
                                     <div>
                                         <label className="flex items-center gap-1 text-sm font-bold text-slate-700 mb-1"><Key className="w-4 h-4" /> Contraseña Inicial</label>
                                         <input required type="text" minLength={6} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-brand-500/20" value={formData.password} onChange={e => setFormData({ ...formData, password: e.target.value })} placeholder="Mínimo 6 caracteres" />
                                     </div>
-
                                     <div>
                                         <label className="flex items-center gap-1 text-sm font-bold text-slate-700 mb-2"><Shield className="w-4 h-4" /> Cargo / Permisos</label>
                                         <div className="grid grid-cols-2 gap-3">
                                             <button type="button" onClick={() => setFormData({ ...formData, role: 'staff' })} className={`p-3 rounded-xl border-2 font-bold text-sm transition-all ${formData.role === 'staff' ? 'border-brand-500 bg-brand-50 text-blue-700' : 'border-slate-100 text-slate-500 hover:border-slate-300'}`}>
-                                                Personal Base<br/><span className="text-xs font-normal opacity-70">(Mozos, Cocineros)</span>
+                                                Personal Base<br/><span className="text-xs font-normal opacity-70">(Mozos, Peluqueros)</span>
                                             </button>
                                             <button type="button" onClick={() => setFormData({ ...formData, role: 'admin' })} className={`p-3 rounded-xl border-2 font-bold text-sm transition-all ${formData.role === 'admin' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-100 text-slate-500 hover:border-slate-300'}`}>
                                                 Administrador<br/><span className="text-xs font-normal opacity-70">(Gerentes, Cajeros)</span>
                                             </button>
                                         </div>
                                     </div>
-
                                     <div className="pt-4 mt-2 border-t border-slate-100">
                                         <button type="submit" disabled={isCreating} className="w-full py-4 bg-brand-600 hover:bg-brand-700 text-white rounded-xl font-bold flex justify-center items-center gap-2 disabled:opacity-50 transition-all shadow-lg shadow-brand-500/20">
                                             {isCreating ? <Loader2 className="w-5 h-5 animate-spin" /> : <Users className="w-5 h-5" />} 
@@ -263,6 +322,36 @@ export default function Staff() {
                     </div>
                 </Dialog>
             </Transition>
+
+            {/* MODAL CONFIGURAR HORARIOS (Abre el panel de los globitos) */}
+            <Transition appear show={isScheduleModalOpen} as={Fragment}>
+                <Dialog as="div" className="relative z-50" onClose={() => setIsScheduleModalOpen(false)}>
+                    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm" />
+                    <div className="fixed inset-0 overflow-y-auto">
+                        <div className="flex min-h-full items-center justify-center p-4">
+                            <Dialog.Panel className="w-full max-w-2xl transform overflow-hidden rounded-3xl bg-white text-left align-middle shadow-xl transition-all">
+                                <div className="flex justify-between items-center p-6 border-b border-slate-100 bg-slate-50/50">
+                                    <div>
+                                        <Dialog.Title as="h3" className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                                            <Clock className="w-6 h-6 text-brand-500" />
+                                            Agenda de {selectedResource?.name}
+                                        </Dialog.Title>
+                                        <p className="text-sm text-slate-500 mt-1">Configurá los días y rangos horarios de atención.</p>
+                                    </div>
+                                    <button onClick={() => setIsScheduleModalOpen(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors"><X className="w-5 h-5 text-slate-500" /></button>
+                                </div>
+                                
+                                <div className="p-6 bg-slate-50 flex justify-center items-center">
+                                    {selectedResource && orgData && (
+                                        <ScheduleManager resourceId={selectedResource.id} orgId={orgData.id} />
+                                    )}
+                                </div>
+                            </Dialog.Panel>
+                        </div>
+                    </div>
+                </Dialog>
+            </Transition>
+
         </div>
     );
 }

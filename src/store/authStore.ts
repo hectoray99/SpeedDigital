@@ -28,60 +28,35 @@ export const useAuthStore = create<AuthState>((set) => ({
         return;
       }
 
-      let fetchError = null;
-      let membership = null;
-
-      // EL GRAN CAMBIO: Buscamos directamente en la tabla de miembros, que es la fuente de la verdad
-      for (let i = 0; i < 3; i++) {
-        const { data, error } = await supabase
-          .from("organization_members")
-          .select(`
-            role,
-            organizations (id, name, industry, slug, logo_url, setup_completed)
-          `)
-          .eq("profile_id", session.user.id)
-          .limit(1)
-          .maybeSingle(); // maybeSingle no tira error si devuelve vacío
-
-        if (data || !error) {
-          membership = data;
-          fetchError = null;
-          break;
-        } else {
-          fetchError = error;
-          await new Promise((res) => setTimeout(res, 500));
-        }
-      }
+      // EL GRAN CAMBIO: Buscamos directamente la organización donde este usuario es el DUEÑO (owner_id)
+      const { data: org, error: fetchError } = await supabase
+        .from("organizations")
+        .select("*")
+        .eq("owner_id", session.user.id)
+        .maybeSingle(); // usamos maybeSingle para que no tire un error rojo si no encuentra nada
 
       if (fetchError) {
-        console.error("Fallo crítico al buscar membresía:", fetchError);
-        await supabase.auth.signOut();
-        set({ user: null, orgData: null, userRole: null, isLoading: false });
-        return;
+        console.error("Error al buscar la organización:", fetchError);
+        // No cerramos la sesión acá por si es un error temporal, solo lo dejamos pasar sin org
       }
 
-      // Si el usuario tiene una membresía asignada (Ej: el Mozo que acabás de crear)
-      if (membership && membership.organizations) {
-         // Supabase puede devolver un array o un objeto dependiendo de la relación, lo normalizamos:
-         const org = Array.isArray(membership.organizations) 
-            ? membership.organizations[0] 
-            : membership.organizations;
-
-         set({
-            user: session.user,
-            orgData: org,
-            userRole: membership.role, // Acá sabe que es 'staff' o 'admin'
-            isLoading: false,
-         });
+      if (org) {
+        // ¡Tiene un negocio creado! Lo dejamos entrar al Dashboard
+        set({
+          user: session.user,
+          orgData: org,
+          userRole: 'owner', // Forzamos el rol owner porque lo encontramos por owner_id
+          isLoading: false,
+        });
       } else {
-         // Si NO tiene membresía, significa que es alguien que se registró solo en tu web pública
-         // Lo dejamos pasar sin orgData para que le salte el Onboarding y cree su empresa
-         set({
-            user: session.user,
-            orgData: null,
-            userRole: 'owner', 
-            isLoading: false,
-         });
+        // No tiene negocio (orgData: null). 
+        // El AuthGuard va a ver esto y lo va a mandar directo a la pantalla de Onboarding.
+        set({
+          user: session.user,
+          orgData: null,
+          userRole: null, 
+          isLoading: false,
+        });
       }
 
     } catch (error) {

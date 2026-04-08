@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { supabase } from '../../../lib/supabase';
-import { Loader2, Utensils, MapPin, Phone } from 'lucide-react';
+import { Loader2, Utensils, MapPin, Phone, Search } from 'lucide-react';
 
 interface MenuItem {
     id: string;
@@ -29,7 +29,11 @@ export default function DigitalMenu() {
     const [org, setOrg] = useState<Organization | null>(null);
     const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
     const [categories, setCategories] = useState<string[]>([]);
-    const [activeCategory, setActiveCategory] = useState<string>('');
+    
+    // Estados nuevos para la búsqueda y filtros
+    const [activeCategory, setActiveCategory] = useState<string>('Todas');
+    const [search, setSearch] = useState('');
+    
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(false);
 
@@ -72,10 +76,8 @@ export default function DigitalMenu() {
                 new Set(items.map(item => item.properties?.category).filter(Boolean))
             ) as string[];
 
-            setCategories(uniqueCategories);
-            if (uniqueCategories.length > 0) {
-                setActiveCategory(uniqueCategories[0]);
-            }
+            // Agregamos "Todas" al principio
+            setCategories(['Todas', ...uniqueCategories]);
 
         } catch (error) {
             console.error('Error fetching digital menu:', error);
@@ -104,14 +106,18 @@ export default function DigitalMenu() {
         );
     }
 
-    // Filtramos los platos según la categoría seleccionada
-    const visibleItems = menuItems.filter(item => item.properties?.category === activeCategory);
+    // Filtramos los platos combinando la Búsqueda + la Categoría
+    const visibleItems = menuItems.filter(item => {
+        const matchesSearch = item.name.toLowerCase().includes(search.toLowerCase());
+        const matchesCategory = activeCategory === 'Todas' || item.properties?.category === activeCategory;
+        return matchesSearch && matchesCategory;
+    });
 
     return (
         <div className="min-h-screen bg-slate-50 pb-12 font-sans">
             
             {/* CABECERA (Portada del Restaurante) */}
-            <div className="bg-slate-900 text-white pt-12 pb-24 px-6 rounded-b-[2.5rem] shadow-lg relative">
+            <div className="bg-slate-900 text-white pt-12 pb-24 px-6 rounded-b-[2.5rem] shadow-lg relative overflow-hidden">
                 <div className="max-w-md mx-auto text-center relative z-10">
                     {org.logo_url ? (
                         <img src={org.logo_url} alt={org.name} className="w-24 h-24 rounded-full mx-auto border-4 border-white/10 object-cover mb-4 shadow-xl" />
@@ -133,36 +139,52 @@ export default function DigitalMenu() {
                     </div>
                 </div>
                 
-                {/* Decoración de fondo */}
-                <div className="absolute top-0 left-0 w-full h-full overflow-hidden rounded-b-[2.5rem] opacity-20 pointer-events-none">
+                {/* Decoración de fondo (Tus luces neón) */}
+                <div className="absolute top-0 left-0 w-full h-full overflow-hidden opacity-20 pointer-events-none">
                     <div className="absolute -top-20 -right-20 w-64 h-64 bg-brand-500 rounded-full mix-blend-screen filter blur-3xl"></div>
                     <div className="absolute bottom-0 -left-20 w-64 h-64 bg-indigo-500 rounded-full mix-blend-screen filter blur-3xl"></div>
                 </div>
             </div>
 
-            <div className="max-w-md mx-auto px-4 -mt-12 relative z-20">
+            <div className="max-w-md mx-auto px-4 -mt-16 relative z-20">
                 
-                {/* NAVEGACIÓN DE CATEGORÍAS (Sticky / Pegajosa) */}
-                <div className="bg-white p-2 rounded-2xl shadow-xl shadow-slate-200/50 mb-6 flex gap-2 overflow-x-auto hide-scrollbar sticky top-4 z-30 border border-slate-100">
-                    {categories.map(cat => (
-                        <button
-                            key={cat}
-                            onClick={() => setActiveCategory(cat)}
-                            className={`px-5 py-2.5 rounded-xl font-bold text-sm whitespace-nowrap transition-all flex-1 text-center ${
-                                activeCategory === cat 
-                                ? 'bg-brand-500 text-white shadow-md' 
-                                : 'bg-transparent text-slate-500 hover:bg-slate-50'
-                            }`}
-                        >
-                            {cat.toUpperCase()}
-                        </button>
-                    ))}
+                {/* BUSCADOR Y NAVEGACIÓN DE CATEGORÍAS */}
+                <div className="bg-white p-3 rounded-3xl shadow-xl shadow-slate-200/50 mb-6 border border-slate-100">
+                    
+                    {/* Buscador */}
+                    <div className="relative mb-3">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
+                        <input 
+                            type="text" 
+                            placeholder="Buscar plato o bebida..." 
+                            value={search} 
+                            onChange={(e) => setSearch(e.target.value)} 
+                            className="w-full pl-10 pr-4 py-3 bg-slate-50 rounded-2xl border border-slate-100 focus:border-brand-300 focus:ring-2 focus:ring-brand-500/20 font-medium outline-none transition-all"
+                        />
+                    </div>
+
+                    {/* Categorías (Sticky / Pegajosa) */}
+                    <div className="flex gap-2 overflow-x-auto hide-scrollbar snap-x pb-1">
+                        {categories.map(cat => (
+                            <button
+                                key={cat}
+                                onClick={() => setActiveCategory(cat)}
+                                className={`snap-start px-5 py-2.5 rounded-xl font-bold text-sm whitespace-nowrap transition-all flex-1 text-center ${
+                                    activeCategory === cat 
+                                    ? 'bg-brand-500 text-white shadow-md' 
+                                    : 'bg-slate-50 text-slate-500 hover:bg-slate-100'
+                                }`}
+                            >
+                                {cat.toUpperCase()}
+                            </button>
+                        ))}
+                    </div>
                 </div>
 
                 {/* LISTA DE PLATOS */}
                 <div className="space-y-4">
                     {visibleItems.map(item => (
-                        <div key={item.id} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex gap-4 overflow-hidden relative group">
+                        <div key={item.id} className="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 flex gap-4 overflow-hidden relative group">
                             
                             {/* Información del Plato */}
                             <div className="flex-1 flex flex-col justify-center">
@@ -179,7 +201,7 @@ export default function DigitalMenu() {
 
                             {/* Foto del Plato (Si tiene) */}
                             {item.properties?.image_url && (
-                                <div className="w-28 h-28 shrink-0 rounded-xl overflow-hidden bg-slate-100 shadow-inner">
+                                <div className="w-28 h-28 shrink-0 rounded-2xl overflow-hidden bg-slate-100 shadow-inner">
                                     <img 
                                         src={item.properties.image_url} 
                                         alt={item.name} 
@@ -192,17 +214,17 @@ export default function DigitalMenu() {
                 </div>
 
                 {visibleItems.length === 0 && (
-                    <div className="text-center py-12 text-slate-400">
-                        <Utensils className="w-12 h-12 mx-auto mb-3 opacity-20" />
-                        <p>No hay platos en esta categoría.</p>
+                    <div className="text-center py-12 text-slate-400 bg-white rounded-3xl border border-slate-100 mt-4">
+                        <Search className="w-12 h-12 mx-auto mb-3 opacity-20" />
+                        <p className="font-bold">No encontramos platos con esa búsqueda.</p>
                     </div>
                 )}
             </div>
 
-            {/* Footer */}
+            {/* Footer B2B */}
             <div className="mt-12 text-center pb-8">
                 <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">
-                    Menú Digital creado con SpeedDigital
+                    Menú Digital creado con <span className="text-brand-500">SpeedDigital</span>
                 </p>
             </div>
             
