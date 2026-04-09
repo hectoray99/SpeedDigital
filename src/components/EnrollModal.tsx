@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { X, Loader2, CheckCircle, Store, Hash, Clock } from 'lucide-react';
 import { toast } from 'sonner';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface Props {
     isOpen: boolean;
     onClose: () => void;
     studentId: string | null;
     studentName: string;
-    onSuccess?: () => void; // <--- Agregado para recargar datos
+    onSuccess?: () => void;
 }
 
 interface Product {
@@ -16,7 +17,7 @@ interface Product {
     name: string;
     price: number;
     type: string;
-    properties: any; // <--- Agregado para leer turnos/clases
+    properties: any;
 }
 
 export default function EnrollModal({ isOpen, onClose, studentId, studentName, onSuccess }: Props) {
@@ -94,7 +95,6 @@ export default function EnrollModal({ isOpen, onClose, studentId, studentName, o
                 currentPlans = [person.details.active_plan];
             }
 
-            // Agregamos el nuevo plan a la lista
             currentPlans.push(newActivePlan);
 
             const updatedDetails = {
@@ -146,88 +146,98 @@ export default function EnrollModal({ isOpen, onClose, studentId, studentName, o
         }
     };
 
-    if (!isOpen) return null;
-
     return (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-white text-slate-900 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
-
-                <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                    <div>
-                        <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                            <Store className="w-5 h-5 text-brand-600" />
-                            Asignar Plan
-                        </h2>
-                        <p className="text-xs text-slate-500">Alumno: <span className="font-semibold text-brand-600">{studentName}</span></p>
-                    </div>
-                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
-                        <X className="w-5 h-5" />
-                    </button>
-                </div>
-
-                <div className="p-6 space-y-6">
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-2">Seleccioná un Plan Activo</label>
-                        <div className="space-y-2 max-h-60 overflow-y-auto pr-2">
-                            {products.length === 0 ? (
-                                <p className="text-sm text-slate-400 italic">No hay planes activos en el catálogo.</p>
-                            ) : (
-                                products.map((product) => (
-                                    <label
-                                        key={product.id}
-                                        className={`flex flex-col p-3 rounded-xl border cursor-pointer transition-all ${selectedProductId === product.id
-                                            ? 'border-brand-500 bg-brand-50 ring-1 ring-brand-500'
-                                            : 'border-slate-200 hover:border-brand-300 hover:bg-slate-50'
-                                            }`}
-                                    >
-                                        <div className="flex items-center justify-between mb-2">
-                                            <div className="flex items-center gap-3">
-                                                <input
-                                                    type="radio"
-                                                    name="product"
-                                                    value={product.id}
-                                                    checked={selectedProductId === product.id}
-                                                    onChange={(e) => setSelectedProductId(e.target.value)}
-                                                    className="w-4 h-4 text-brand-600 border-slate-300 focus:ring-brand-500"
-                                                />
-                                                <div className="font-bold text-slate-900">{product.name}</div>
-                                            </div>
-                                            <div className="font-black text-brand-600">
-                                                ${product.price.toLocaleString()}
-                                            </div>
-                                        </div>
-
-                                        {/* Info extra del plan */}
-                                        <div className="pl-7 text-xs text-slate-500 flex items-center gap-4">
-                                            <span className="flex items-center gap-1">
-                                                <Clock className="w-3 h-3" />
-                                                {product.properties?.schedule === 'morning' ? 'Mañana' :
-                                                    product.properties?.schedule === 'afternoon' ? 'Tarde' :
-                                                        product.properties?.schedule === 'night' ? 'Noche' : 'Libre'}
-                                            </span>
-                                            {product.properties?.plan_mode === 'classes' && (
-                                                <span className="flex items-center gap-1">
-                                                    <Hash className="w-3 h-3" />
-                                                    {product.properties.class_count} clases
-                                                </span>
-                                            )}
-                                        </div>
-                                    </label>
-                                ))
-                            )}
-                        </div>
-                    </div>
-
-                    <button
-                        onClick={handleEnroll}
-                        disabled={loading || !selectedProductId}
-                        className="w-full bg-brand-600 hover:bg-brand-700 text-white py-3 rounded-xl font-bold transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-brand-500/20"
+        <AnimatePresence>
+            {isOpen && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.95 }}
+                        className="bg-white text-slate-900 rounded-3xl shadow-2xl w-full max-w-md overflow-hidden"
                     >
-                        {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle className="w-5 h-5" />}
-                        Confirmar y Generar Deuda
-                    </button>
+                        <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                            <div>
+                                <h2 className="text-xl font-black text-slate-800 flex items-center gap-2">
+                                    <div className="p-2 bg-brand-100 rounded-xl"><Store className="w-5 h-5 text-brand-600" /></div>
+                                    Asignar Plan
+                                </h2>
+                                <p className="text-xs text-slate-500 mt-1">Alumno: <span className="font-bold text-brand-600">{studentName}</span></p>
+                            </div>
+                            <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-xl transition-colors">
+                                <X className="w-5 h-5 text-slate-400" />
+                            </button>
+                        </div>
+
+                        <div className="p-6 md:p-8 space-y-6">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Seleccioná un Plan Activo</label>
+                                <div className="space-y-3 max-h-64 overflow-y-auto pr-2 hide-scrollbar">
+                                    {products.length === 0 ? (
+                                        <p className="text-sm text-slate-400 italic text-center py-4">No hay planes activos en el catálogo.</p>
+                                    ) : (
+                                        products.map((product) => (
+                                            <label
+                                                key={product.id}
+                                                className={`flex flex-col p-4 rounded-2xl border-2 cursor-pointer transition-all relative overflow-hidden group ${selectedProductId === product.id
+                                                    ? 'border-brand-500 bg-brand-50 shadow-md'
+                                                    : 'border-slate-100 hover:border-brand-300 hover:bg-slate-50'
+                                                    }`}
+                                            >
+                                                {selectedProductId === product.id && (
+                                                    <div className="absolute top-0 left-0 w-1.5 h-full bg-brand-500"></div>
+                                                )}
+                                                <div className="flex items-start justify-between mb-3">
+                                                    <div className="flex items-start gap-3">
+                                                        <input
+                                                            type="radio"
+                                                            name="product"
+                                                            value={product.id}
+                                                            checked={selectedProductId === product.id}
+                                                            onChange={(e) => setSelectedProductId(e.target.value)}
+                                                            className="w-4 h-4 mt-1 text-brand-600 border-slate-300 focus:ring-brand-500"
+                                                        />
+                                                        <div>
+                                                            <div className="font-bold text-slate-900 text-lg leading-tight">{product.name}</div>
+                                                            <div className="font-black text-brand-600 mt-0.5">
+                                                                ${product.price.toLocaleString()}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="pl-7 flex items-center gap-3 text-[11px] font-bold text-slate-500 uppercase tracking-wide">
+                                                    <span className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-md">
+                                                        <Clock className="w-3.5 h-3.5" />
+                                                        {product.properties?.schedule === 'morning' ? 'Mañana' :
+                                                            product.properties?.schedule === 'afternoon' ? 'Tarde' :
+                                                                product.properties?.schedule === 'night' ? 'Noche' : 'Libre'}
+                                                    </span>
+                                                    {product.properties?.plan_mode === 'classes' && (
+                                                        <span className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-md">
+                                                            <Hash className="w-3.5 h-3.5" />
+                                                            {product.properties.class_count} clases
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </label>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+
+                            <button
+                                onClick={handleEnroll}
+                                disabled={loading || !selectedProductId}
+                                className="w-full bg-brand-600 hover:bg-brand-500 text-white py-4 rounded-xl font-black transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-brand-500/20 active:scale-95 text-lg"
+                            >
+                                {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle className="w-5 h-5" />}
+                                Asignar y Generar Deuda
+                            </button>
+                        </div>
+                    </motion.div>
                 </div>
-            </div>
-        </div>
+            )}
+        </AnimatePresence>
     );
 }

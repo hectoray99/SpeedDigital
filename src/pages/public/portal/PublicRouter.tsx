@@ -1,40 +1,64 @@
+// =============================================================================
+// PublicRouter.tsx
+// Enrutador Público Multi-Tenant (SaaS).
+// Detecta la industria de la organización mediante el 'slug' y renderiza:
+// - GIMNASIOS: Un Kiosco de Check-in con DNI.
+// - SERVICIOS/CANCHAS: Un Asistente (Wizard) de Reservas paso a paso.
+// =============================================================================
+
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { supabase } from '../../../lib/supabase';
 import { bookingService } from '../../../services/bookingService';
-import { Loader2, Calendar as CalendarIcon, Clock, User, Phone, CheckCircle2, MapPin, ChevronRight, ArrowLeft } from 'lucide-react';
+import { Loader2, Calendar as CalendarIcon, Clock, User, Phone, CheckCircle2, MapPin, ChevronRight, ArrowLeft, Dumbbell, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function PublicRouter() {
     const { slug } = useParams();
     const [loading, setLoading] = useState(true);
     const [org, setOrg] = useState<any>(null);
-    
-    // Datos del catálogo
+
+    // =========================================================================
+    // ESTADOS: MÓDULO RESERVAS (Canchas / Servicios)
+    // =========================================================================
     const [services, setServices] = useState<any[]>([]);
     const [resources, setResources] = useState<any[]>([]);
-    
-    // Estado del Wizard
     const [step, setStep] = useState(1);
     const [selectedService, setSelectedService] = useState<any>(null);
     const [selectedResource, setSelectedResource] = useState<any>(null);
     const [selectedDate, setSelectedDate] = useState<string>('');
     const [selectedTime, setSelectedTime] = useState<string>('');
-    
-    // Datos del cliente
     const [clientName, setClientName] = useState('');
     const [clientPhone, setClientPhone] = useState('');
-    
-    // Algoritmo de horarios
     const [availableSlots, setAvailableSlots] = useState<string[]>([]);
     const [calculatingSlots, setCalculatingSlots] = useState(false);
     const [submitting, setSubmitting] = useState(false);
 
-    // 1. Cargar el Local por el Slug
+    // =========================================================================
+    // ESTADOS: MÓDULO CHECK-IN (Gimnasios)
+    // =========================================================================
+    const [dniInput, setDniInput] = useState('');
+    const [checkInState, setCheckInState] = useState<'idle' | 'checking' | 'success' | 'error'>('idle');
+    const [checkInMessage, setCheckInMessage] = useState('');
+    const [checkInStudent, setCheckInStudent] = useState<string>('');
+
+    // =========================================================================
+    // CICLO DE VIDA: Inicialización
+    // =========================================================================
     useEffect(() => {
         if (slug) fetchOrganization();
     }, [slug]);
 
+    // Calcula horarios libres si estamos en modo Reservas
+    useEffect(() => {
+        if (org && org.industry !== 'gym' && selectedDate && selectedService && selectedResource) {
+            calculateSlots();
+        }
+    }, [selectedDate, selectedService, selectedResource, org]);
+
+    // =========================================================================
+    // FUNCIONES: Carga de Datos
+    // =========================================================================
     async function fetchOrganization() {
         try {
             const { data: orgData, error } = await supabase
@@ -45,28 +69,22 @@ export default function PublicRouter() {
 
             if (error || !orgData) throw new Error('Local no encontrado');
             setOrg(orgData);
-            
-            // Cargar servicios y canchas
-            const [servRes, resRes] = await Promise.all([
-                supabase.from('catalog_items').select('*').eq('organization_id', orgData.id).eq('type', 'service').eq('is_active', true),
-                supabase.from('resources').select('*').eq('organization_id', orgData.id).eq('is_active', true)
-            ]);
 
-            setServices(servRes.data || []);
-            setResources(resRes.data || []);
+            // Solo cargamos catálogo si NO es un gimnasio (el gym solo necesita DNI)
+            if (orgData.industry !== 'gym') {
+                const [servRes, resRes] = await Promise.all([
+                    supabase.from('catalog_items').select('*').eq('organization_id', orgData.id).eq('type', 'service').eq('is_active', true),
+                    supabase.from('resources').select('*').eq('organization_id', orgData.id).eq('is_active', true)
+                ]);
+                setServices(servRes.data || []);
+                setResources(resRes.data || []);
+            }
         } catch (error) {
             toast.error('No pudimos cargar esta página');
         } finally {
             setLoading(false);
         }
     }
-
-    // 2. Calcular horarios cuando elige fecha, cancha y servicio
-    useEffect(() => {
-        if (org && selectedDate && selectedService && selectedResource) {
-            calculateSlots();
-        }
-    }, [selectedDate, selectedService, selectedResource]);
 
     async function calculateSlots() {
         setCalculatingSlots(true);
@@ -76,13 +94,15 @@ export default function PublicRouter() {
         setCalculatingSlots(false);
     }
 
-    // 3. Confirmar la reserva
+    // =========================================================================
+    // ACCIÓN: Crear Reserva (Canchas/Servicios)
+    // =========================================================================
     const handleBooking = async () => {
         if (!clientName || !clientPhone) return toast.error('Completá tus datos para continuar');
         setSubmitting(true);
 
         try {
-            // A. Buscar o crear el cliente
+            // Buscar o crear persona
             let personId = null;
             const { data: existingPerson } = await supabase
                 .from('crm_people')
@@ -90,7 +110,7 @@ export default function PublicRouter() {
                 .eq('organization_id', org.id)
                 .eq('phone', clientPhone)
                 .maybeSingle();
-            
+
             if (existingPerson) {
                 personId = existingPerson.id;
             } else {
@@ -102,12 +122,12 @@ export default function PublicRouter() {
                 personId = newPerson.id;
             }
 
-            // B. Calcular hora de fin
+            // Calcular bloque de tiempo
             const duration = selectedService.duration_minutes || 60;
-            const startDateTime = new Date(`${selectedDate}T${selectedTime}:00-03:00`); 
+            const startDateTime = new Date(`${selectedDate}T${selectedTime}:00-03:00`);
             const endDateTime = new Date(startDateTime.getTime() + duration * 60000);
 
-            // C. Insertar Turno
+            // Guardar Turno
             const { error: appointmentError } = await supabase
                 .from('appointments')
                 .insert([{
@@ -117,34 +137,195 @@ export default function PublicRouter() {
                     service_id: selectedService.id,
                     start_time: startDateTime.toISOString(),
                     end_time: endDateTime.toISOString(),
-                    status: 'pending' // Entra como 'En Espera' para que el dueño lo vea
+                    status: 'pending' // Pendiente de pago/confirmación
                 }]);
 
             if (appointmentError) throw appointmentError;
-            
-            // Avanzar a la pantalla de éxito
-            setStep(5);
+            setStep(5); // Pantalla de éxito
 
         } catch (error) {
             console.error(error);
-            toast.error('Hubo un problema al procesar tu reserva. Intentá de nuevo.');
+            toast.error('Hubo un problema al procesar tu reserva.');
         } finally {
             setSubmitting(false);
         }
     };
 
+    // =========================================================================
+    // ACCIÓN: Procesar Check-In (Gimnasios)
+    // =========================================================================
+    const handleGymCheckIn = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!dniInput.trim()) return;
+
+        setCheckInState('checking');
+        
+        try {
+            // 1. Buscamos al alumno por su DNI
+            const { data: student, error } = await supabase
+                .from('crm_people')
+                .select('full_name, details, is_active')
+                .eq('organization_id', org.id)
+                .eq('identifier', dniInput.trim())
+                .maybeSingle();
+
+            if (error || !student) {
+                setCheckInState('error');
+                setCheckInMessage('DNI no registrado en el sistema.');
+                resetCheckIn(4000);
+                return;
+            }
+
+            if (!student.is_active) {
+                setCheckInState('error');
+                setCheckInMessage('Tu cuenta está inactiva. Pasá por recepción.');
+                resetCheckIn(4000);
+                return;
+            }
+
+            // 2. Validar Planes Activos
+            const details = student.details as any;
+            let plans = details?.active_plans || [];
+            if (plans.length === 0 && details?.active_plan) plans = [details.active_plan];
+
+            if (plans.length === 0) {
+                setCheckInState('error');
+                setCheckInMessage('No tenés ningún plan activo. Pasá por recepción.');
+                resetCheckIn(4000);
+                return;
+            }
+
+            // Verificar si algún plan no está vencido
+            const hasValidPlan = plans.some((p: any) => new Date() <= new Date(p.expires_at));
+
+            if (!hasValidPlan) {
+                setCheckInState('error');
+                setCheckInMessage('Tu plan está vencido. Pasá por recepción para renovar.');
+                resetCheckIn(4000);
+                return;
+            }
+
+            // 3. ¡Acceso Concedido!
+            setCheckInStudent(student.full_name);
+            setCheckInState('success');
+            resetCheckIn(4000);
+
+            // TODO Futuro: Registrar la asistencia en una tabla 'attendance_logs'
+
+        } catch (error) {
+            setCheckInState('error');
+            setCheckInMessage('Error de conexión. Intentá de nuevo.');
+            resetCheckIn(4000);
+        }
+    };
+
+    const resetCheckIn = (delay: number) => {
+        setTimeout(() => {
+            setCheckInState('idle');
+            setDniInput('');
+            setCheckInMessage('');
+            setCheckInStudent('');
+        }, delay);
+    };
+
+    // =========================================================================
+    // RENDER: Estados de Carga
+    // =========================================================================
     if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><Loader2 className="w-10 h-10 animate-spin text-brand-500" /></div>;
     if (!org) return <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-6 text-center"><h1 className="text-2xl font-black text-slate-800">404 - Local no encontrado</h1><p className="text-slate-500 mt-2">Revisá que el link esté bien escrito.</p></div>;
 
     const isSports = org.industry === 'sports' || org.industry === 'gym';
 
+    // =========================================================================
+    // RENDER 1: MODO GIMNASIO (Kiosco de Asistencia)
+    // =========================================================================
+    if (org.industry === 'gym') {
+        return (
+            <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-white relative overflow-hidden">
+                {/* Elementos decorativos de fondo */}
+                <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-brand-500 rounded-full mix-blend-multiply filter blur-[128px] opacity-20 animate-pulse"></div>
+                <div className="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-emerald-500 rounded-full mix-blend-multiply filter blur-[128px] opacity-20 animate-pulse delay-1000"></div>
+
+                <div className="z-10 w-full max-w-md text-center space-y-8">
+                    {org.logo_url ? (
+                        <img src={org.logo_url} alt={org.name} className="w-32 h-32 rounded-3xl object-cover mx-auto shadow-2xl border-4 border-slate-800" />
+                    ) : (
+                        <div className="w-32 h-32 bg-slate-800 rounded-3xl flex items-center justify-center mx-auto shadow-2xl border border-slate-700">
+                            <Dumbbell className="w-16 h-16 text-brand-500" />
+                        </div>
+                    )}
+                    
+                    <div>
+                        <h1 className="text-4xl font-black tracking-tight">{org.name}</h1>
+                        <p className="text-slate-400 font-medium mt-2 text-lg">Control de Acceso</p>
+                    </div>
+
+                    <div className="bg-slate-800/50 backdrop-blur-xl p-8 rounded-3xl border border-slate-700 shadow-2xl relative min-h-[250px] flex flex-col justify-center">
+                        
+                        {checkInState === 'idle' && (
+                            <form onSubmit={handleGymCheckIn} className="animate-in zoom-in-95 duration-300">
+                                <label className="block text-sm font-bold text-slate-300 mb-4">Ingresá tu DNI para dar el presente</label>
+                                <input 
+                                    autoFocus
+                                    type="number" 
+                                    className="w-full bg-slate-900 border-2 border-slate-700 rounded-2xl p-5 text-center text-3xl font-black text-white focus:border-brand-500 focus:ring-4 focus:ring-brand-500/20 outline-none transition-all placeholder:text-slate-700"
+                                    placeholder="DNI"
+                                    value={dniInput}
+                                    onChange={(e) => setDniInput(e.target.value)}
+                                />
+                                <button 
+                                    type="submit"
+                                    disabled={!dniInput}
+                                    className="w-full mt-6 bg-brand-500 hover:bg-brand-600 text-white p-5 rounded-2xl font-black text-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-brand-500/20 active:scale-95"
+                                >
+                                    Confirmar Asistencia
+                                </button>
+                            </form>
+                        )}
+
+                        {checkInState === 'checking' && (
+                            <div className="flex flex-col items-center justify-center animate-in fade-in duration-300">
+                                <Loader2 className="w-16 h-16 animate-spin text-brand-500 mb-4" />
+                                <p className="font-bold text-slate-300 text-lg">Verificando pase...</p>
+                            </div>
+                        )}
+
+                        {checkInState === 'success' && (
+                            <div className="flex flex-col items-center justify-center animate-in zoom-in-95 duration-500">
+                                <div className="w-24 h-24 bg-emerald-500/20 rounded-full flex items-center justify-center mb-4 border-4 border-emerald-500/30">
+                                    <CheckCircle2 className="w-12 h-12 text-emerald-400" />
+                                </div>
+                                <h2 className="text-3xl font-black text-emerald-400 mb-2">¡Adelante!</h2>
+                                <p className="text-slate-300 text-xl font-bold">{checkInStudent}</p>
+                                <p className="text-emerald-500/80 font-medium mt-1">Suscripción al día</p>
+                            </div>
+                        )}
+
+                        {checkInState === 'error' && (
+                            <div className="flex flex-col items-center justify-center animate-in zoom-in-95 duration-300">
+                                <div className="w-24 h-24 bg-red-500/20 rounded-full flex items-center justify-center mb-4 border-4 border-red-500/30">
+                                    <AlertTriangle className="w-12 h-12 text-red-400" />
+                                </div>
+                                <h2 className="text-2xl font-black text-red-400 mb-2">Acceso Denegado</h2>
+                                <p className="text-slate-300 text-center font-medium px-4">{checkInMessage}</p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    // =========================================================================
+    // RENDER 2: MODO RESERVAS (Canchas y Servicios)
+    // =========================================================================
     return (
         <div className="min-h-screen bg-slate-50 pb-12">
-            {/* CABECERA DEL LOCAL */}
+            {/* Header del Local */}
             <div className="bg-white border-b border-slate-200 sticky top-0 z-10 shadow-sm">
                 <div className="max-w-lg mx-auto px-4 py-4 flex items-center gap-3">
                     {org.logo_url ? (
-                        <img src={org.logo_url} alt={org.name} className="w-10 h-10 rounded-xl object-cover" />
+                        <img src={org.logo_url} alt={org.name} className="w-10 h-10 rounded-xl object-cover border border-slate-100" />
                     ) : (
                         <div className="w-10 h-10 bg-brand-500 rounded-xl flex items-center justify-center text-white font-black text-lg shadow-sm">
                             {org.name.charAt(0).toUpperCase()}
@@ -159,7 +340,7 @@ export default function PublicRouter() {
 
             <div className="max-w-lg mx-auto px-4 pt-6">
                 
-                {/* WIZARD: PASO 1 - SERVICIO */}
+                {/* WIZARD PASO 1: SERVICIO */}
                 {step === 1 && (
                     <div className="animate-in fade-in slide-in-from-bottom-4">
                         <h2 className="text-xl font-black text-slate-800 mb-4">¿Qué vas a reservar?</h2>
@@ -186,7 +367,7 @@ export default function PublicRouter() {
                     </div>
                 )}
 
-                {/* WIZARD: PASO 2 - CANCHA / PROFESIONAL */}
+                {/* WIZARD PASO 2: RECURSO */}
                 {step === 2 && (
                     <div className="animate-in fade-in slide-in-from-right-4">
                         <button onClick={() => setStep(1)} className="flex items-center gap-1 text-sm font-bold text-slate-400 hover:text-slate-600 mb-4">
@@ -210,7 +391,7 @@ export default function PublicRouter() {
                     </div>
                 )}
 
-                {/* WIZARD: PASO 3 - FECHA Y HORA */}
+                {/* WIZARD PASO 3: FECHA Y HORA */}
                 {step === 3 && (
                     <div className="animate-in fade-in slide-in-from-right-4">
                         <button onClick={() => setStep(2)} className="flex items-center gap-1 text-sm font-bold text-slate-400 hover:text-slate-600 mb-4">
@@ -276,7 +457,7 @@ export default function PublicRouter() {
                     </div>
                 )}
 
-                {/* WIZARD: PASO 4 - DATOS DEL CLIENTE */}
+                {/* WIZARD PASO 4: DATOS DE CONTACTO */}
                 {step === 4 && (
                     <div className="animate-in fade-in slide-in-from-right-4">
                         <button onClick={() => setStep(3)} className="flex items-center gap-1 text-sm font-bold text-slate-400 hover:text-slate-600 mb-4">
@@ -326,10 +507,10 @@ export default function PublicRouter() {
                     </div>
                 )}
 
-                {/* WIZARD: PASO 5 - ÉXITO */}
+                {/* WIZARD PASO 5: ÉXITO */}
                 {step === 5 && (
                     <div className="animate-in zoom-in-95 duration-500 flex flex-col items-center justify-center text-center py-12">
-                        <div className="w-24 h-24 bg-emerald-100 text-emerald-500 rounded-full flex items-center justify-center mb-6 shadow-inner">
+                        <div className="w-24 h-24 bg-emerald-100 text-emerald-500 rounded-full flex items-center justify-center mb-6 shadow-inner border-4 border-emerald-50">
                             <CheckCircle2 className="w-12 h-12" />
                         </div>
                         <h2 className="text-3xl font-black text-slate-800 mb-2">¡Reserva Exitosa!</h2>
@@ -338,7 +519,7 @@ export default function PublicRouter() {
                         </p>
                         <button 
                             onClick={() => window.location.reload()}
-                            className="text-brand-600 font-bold hover:text-brand-700 hover:underline"
+                            className="text-brand-600 font-bold hover:text-brand-700 hover:underline bg-brand-50 px-6 py-3 rounded-xl transition-colors"
                         >
                             Hacer otra reserva
                         </button>

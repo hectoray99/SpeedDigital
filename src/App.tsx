@@ -35,7 +35,16 @@ import StudentDetail from './pages/admin/students/StudentDetail';
 import Settings from './pages/admin/settings/Settings';
 import Agenda from './pages/admin/services/Agenda';
 
-// --> ACÁ IMPORTAMOS EL GESTOR DE CANCHAS/AGENDAS NUEVO <--
+// ==========================================
+// 4. SUPER ADMIN
+// ==========================================
+import SuperAdminGuard from './components/SuperAdminGuard';
+import SuperAdminLayout from './components/layout/SuperAdminLayout';
+import SuperAdminDashboard from './pages/superadmin/SuperAdminDashboard';
+import SuperAdminOrganizations from './pages/superadmin/SuperAdminOrganizations';
+import SuperAdminSubscriptions from './pages/superadmin/SuperAdminSubscriptions';
+import SuperAdminAnnouncements from './pages/superadmin/SuperAdminAnnouncements';
+
 import Resources from './pages/admin/services/Resources'; 
 
 export default function App() {
@@ -55,7 +64,9 @@ export default function App() {
         
         {/* Accesos de clientes y staff basados en el nombre del local (Slug) */}
         <Route path="/m/:slug" element={<DigitalMenu />} />
-        <Route path="/equipo/:slug" element={<StaffLogin />} />
+        {/* Aseguramos que la ruta de staff apunte al StaffLogin */}
+        <Route path="/staff-login/:slug" element={<StaffLogin />} />
+        <Route path="/equipo/:slug" element={<StaffLogin />} /> {/* Alias opcional */}
         <Route path="/p/:slug" element={<PublicRouter />} />
 
         {/* Portal exclusivo para alumnos (Academias) */}
@@ -65,7 +76,7 @@ export default function App() {
 
         {/* =========================================
             ZONA PRIVADA (El "Patovica" AuthGuard vigila acá)
-        ========================================= */}
+        ======================================== */}
         <Route element={<AuthGuard><Outlet /></AuthGuard>}>
           
           <Route path="/onboarding" element={<Onboarding />} />
@@ -92,9 +103,22 @@ export default function App() {
             
             {/* Módulo: Servicios y Gym (Agenda y Canchas) */}
             <Route path="/admin/agenda" element={<Agenda />} />
-            {/* --> ACÁ AGREGAMOS LA RUTA NUEVA <-- */}
             <Route path="/admin/resources" element={<Resources />} />
 
+          </Route>
+        </Route>
+
+        {/* =========================================
+            ZONA GOD MODE (SUPER ADMIN)
+        ========================================= */}
+        <Route element={<SuperAdminGuard />}>
+          <Route element={<SuperAdminLayout />}>
+            <Route path="/superadmin/dashboard" element={<SuperAdminDashboard />} />
+            <Route path="/superadmin/organizations" element={<SuperAdminOrganizations />} />
+            <Route path="/superadmin/subscriptions" element={<SuperAdminSubscriptions />} />
+            <Route path="/superadmin/announcements" element={<SuperAdminAnnouncements />} />
+            {/* Redirección por defecto */}
+            <Route path="/superadmin" element={<Navigate to="/superadmin/dashboard" replace />} />
           </Route>
         </Route>
 

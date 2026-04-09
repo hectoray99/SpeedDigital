@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../../lib/supabase';
 import { useAuthStore } from '../../../store/authStore';
-import { Loader2, Lock, Mail, ArrowRight, ShieldCheck } from 'lucide-react';
+import { Loader2, Lock, User, ArrowRight, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function StaffLogin() {
@@ -14,18 +14,17 @@ export default function StaffLogin() {
     const [orgData, setOrgData] = useState<any>(null);
     const [orgError, setOrgError] = useState(false);
 
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
+    const [username, setUsername] = useState('');
+    const [pin, setPin] = useState('');
     const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-    // 1. Buscamos si existe el local (el slug) en la base de datos
     useEffect(() => {
         async function fetchOrg() {
             if (!slug) return;
             try {
                 const { data, error } = await supabase
                     .from('organizations')
-                    .select('id, name, industry, logo_url')
+                    .select('id, name, industry, logo_url, slug')
                     .eq('slug', slug)
                     .single();
 
@@ -40,22 +39,24 @@ export default function StaffLogin() {
         fetchOrg();
     }, [slug]);
 
-    // 2. Procesamos el Login
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!orgData) return;
         setIsLoggingIn(true);
 
         try {
-            // Logueamos en Supabase
+            // Reconstruimos las credenciales fantasma del POS
+            const cleanUsername = username.replace(/\s+/g, '').toLowerCase().trim();
+            const dummyEmail = `${cleanUsername}@${orgData.slug}.pos`;
+            const securePassword = `${pin}-pos`;
+
             const { data, error } = await supabase.auth.signInWithPassword({
-                email,
-                password,
+                email: dummyEmail,
+                password: securePassword,
             });
 
-            if (error) throw error;
+            if (error) throw new Error('Usuario o PIN incorrecto');
 
-            // Verificamos de forma extra que este usuario REALMENTE pertenezca a este local
             const { data: membership, error: memError } = await supabase
                 .from('organization_members')
                 .select('role')
@@ -68,19 +69,17 @@ export default function StaffLogin() {
                 throw new Error('No tienes acceso a este negocio.');
             }
 
-            // Si todo está ok, recargamos el estado global y lo mandamos adentro
-            toast.success(`Bienvenido al sistema`);
+            toast.success(`Acceso autorizado`);
             await initializeAuth();
             
-            // Redirigimos inteligentemente según su rol
             if (orgData.industry === 'gastronomy') {
                 if (membership.role === 'staff') {
-                    navigate('/admin/salon'); // El mozo va directo al salón
+                    navigate('/admin/salon'); 
                 } else {
-                    navigate('/admin/dashboard'); // El admin va al panel
+                    navigate('/admin/dashboard'); 
                 }
             } else {
-                navigate('/admin/students'); // Otros rubros van a su pantalla principal
+                navigate('/admin/dashboard'); 
             }
 
         } catch (error: any) {
@@ -92,68 +91,71 @@ export default function StaffLogin() {
     };
 
     if (loadingOrg) {
-        return <div className="min-h-screen bg-slate-50 flex items-center justify-center"><Loader2 className="w-10 h-10 animate-spin text-brand-500" /></div>;
+        return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="w-10 h-10 animate-spin text-brand-500" /></div>;
     }
 
     if (orgError) {
         return (
-            <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 text-center">
-                <ShieldCheck className="w-16 h-16 text-slate-300 mb-4" />
-                <h1 className="text-2xl font-black text-slate-800 mb-2">Acceso Denegado</h1>
-                <p className="text-slate-500 max-w-md">No pudimos encontrar este negocio. Verifica que el enlace (URL) sea el correcto e intenta nuevamente.</p>
+            <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center p-4 text-center">
+                <ShieldCheck className="w-16 h-16 text-slate-600 mb-4" />
+                <h1 className="text-2xl font-black text-white mb-2 tracking-tight">Acceso Denegado</h1>
+                <p className="text-slate-400 max-w-md font-medium">No pudimos encontrar este negocio. Verifica que el enlace (URL) sea el correcto e intenta nuevamente.</p>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 sm:p-8">
-            <div className="w-full max-w-md bg-white rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100 overflow-hidden">
+        <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center p-4 sm:p-8 relative overflow-hidden font-sans selection:bg-brand-500/30">
+            
+            <div className="absolute top-[-20%] left-[-10%] w-[70vw] h-[70vw] bg-brand-600/10 rounded-full blur-[120px] pointer-events-none"></div>
+            <div className="absolute bottom-[-20%] right-[-10%] w-[60vw] h-[60vw] bg-indigo-600/10 rounded-full blur-[120px] pointer-events-none"></div>
+
+            <div className="w-full max-w-md bg-[#0A0A0A] rounded-[2.5rem] shadow-2xl border border-white/10 overflow-hidden relative z-10 backdrop-blur-xl">
                 
-                {/* Cabecera del Local */}
-                <div className="bg-slate-900 text-white p-8 text-center relative overflow-hidden">
-                    <div className="absolute top-0 left-0 w-full h-full bg-brand-500/10 blur-2xl"></div>
+                <div className="p-8 text-center relative overflow-hidden border-b border-white/5">
                     <div className="relative z-10">
                         {orgData.logo_url ? (
-                            <img src={orgData.logo_url} alt={orgData.name} className="w-20 h-20 rounded-2xl mx-auto mb-4 object-cover border-4 border-slate-800" />
+                            <img src={orgData.logo_url} alt={orgData.name} className="w-24 h-24 rounded-3xl mx-auto mb-5 object-cover border-2 border-white/10 shadow-xl" />
                         ) : (
-                            <div className="w-20 h-20 rounded-2xl mx-auto mb-4 bg-slate-800 border-4 border-slate-700 flex items-center justify-center text-2xl font-black text-brand-400">
+                            <div className="w-24 h-24 rounded-3xl mx-auto mb-5 bg-white/5 border-2 border-white/10 flex items-center justify-center text-3xl font-black text-white shadow-xl">
                                 {orgData.name.charAt(0).toUpperCase()}
                             </div>
                         )}
-                        <h1 className="text-2xl font-black tracking-tight">{orgData.name}</h1>
-                        <p className="text-slate-400 text-sm mt-1">Portal de Personal</p>
+                        <h1 className="text-2xl font-black tracking-tight text-white mb-1">{orgData.name}</h1>
+                        <p className="text-brand-400 text-xs font-bold uppercase tracking-widest">Portal de Personal</p>
                     </div>
                 </div>
 
-                {/* Formulario de Login */}
-                <div className="p-8">
-                    <form onSubmit={handleLogin} className="space-y-5">
+                <div className="p-8 md:p-10">
+                    <form onSubmit={handleLogin} className="space-y-6">
                         <div>
-                            <label className="block text-sm font-bold text-slate-700 mb-2">Tu Usuario / Correo</label>
+                            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Tu Usuario</label>
                             <div className="relative">
-                                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"><Mail className="w-5 h-5" /></span>
+                                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"><User className="w-5 h-5" /></span>
                                 <input 
-                                    type="email" 
+                                    type="text" 
                                     required
-                                    value={email}
-                                    onChange={(e) => setEmail(e.target.value)}
-                                    className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-all font-medium"
-                                    placeholder="ejemplo@negocio.com"
+                                    value={username}
+                                    onChange={(e) => setUsername(e.target.value)}
+                                    className="w-full pl-12 pr-4 py-4 bg-white/5 border border-white/10 rounded-2xl outline-none focus:ring-2 focus:ring-brand-500/50 focus:bg-white/10 transition-all font-bold text-white lowercase"
+                                    placeholder="ej: marcos"
                                 />
                             </div>
                         </div>
 
                         <div>
-                            <label className="block text-sm font-bold text-slate-700 mb-2">Contraseña</label>
+                            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">PIN de Acceso</label>
                             <div className="relative">
-                                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"><Lock className="w-5 h-5" /></span>
+                                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"><Lock className="w-5 h-5" /></span>
                                 <input 
                                     type="password" 
+                                    inputMode="numeric"
+                                    maxLength={6}
                                     required
-                                    value={password}
-                                    onChange={(e) => setPassword(e.target.value)}
-                                    className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-all font-medium"
-                                    placeholder="••••••••"
+                                    value={pin}
+                                    onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
+                                    className="w-full pl-12 pr-4 py-4 bg-white/5 border border-white/10 rounded-2xl outline-none focus:ring-2 focus:ring-brand-500/50 focus:bg-white/10 transition-all font-black tracking-widest text-white text-xl"
+                                    placeholder="••••"
                                 />
                             </div>
                         </div>
@@ -161,18 +163,13 @@ export default function StaffLogin() {
                         <button 
                             type="submit" 
                             disabled={isLoggingIn}
-                            className="w-full py-4 mt-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl font-bold flex justify-center items-center gap-2 disabled:opacity-50 transition-all shadow-lg shadow-brand-500/20"
+                            className="w-full py-4 mt-4 bg-brand-600 hover:bg-brand-500 text-white rounded-2xl font-black flex justify-center items-center gap-2 disabled:opacity-50 transition-all shadow-[0_0_20px_-5px_rgba(79,70,229,0.5)] active:scale-95 text-lg"
                         >
-                            {isLoggingIn ? <Loader2 className="w-5 h-5 animate-spin" /> : (
-                                <>Ingresar a mi turno <ArrowRight className="w-5 h-5" /></>
+                            {isLoggingIn ? <Loader2 className="w-6 h-6 animate-spin" /> : (
+                                <>Ingresar al sistema <ArrowRight className="w-5 h-5" /></>
                             )}
                         </button>
                     </form>
-                </div>
-                
-                {/* Footer Institucional de tu SaaS */}
-                <div className="bg-slate-50 p-4 text-center border-t border-slate-100">
-                    <p className="text-xs text-slate-400 font-medium">Desarrollado por <span className="text-slate-600 font-bold">SpeedDigital</span></p>
                 </div>
             </div>
         </div>

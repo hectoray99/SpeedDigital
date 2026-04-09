@@ -1,19 +1,19 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { useAuthStore } from '../../../store/authStore';
-import { Plus, LayoutGrid, Armchair, Users, Receipt } from 'lucide-react';
+import { Plus, LayoutGrid, Armchair, Users, Receipt, Pencil } from 'lucide-react';
+import { toast } from 'sonner';
 import CreateTableModal from '../../../components/CreateTableModal';
 import TablePOSModal from '../../../components/TablePOSModal';
 
 export default function Salon() {
-    const { orgData, userRole } = useAuthStore(); // <-- Traemos userRole
+    const { orgData, userRole } = useAuthStore();
     const [tables, setTables] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [selectedTable, setSelectedTable] = useState<any | null>(null);
 
-    // Booleano de seguridad
     const isOwnerOrAdmin = userRole === 'owner' || userRole === 'admin';
 
     useEffect(() => {
@@ -54,16 +54,37 @@ export default function Salon() {
             });
 
             setTables(tablesWithOrders);
-
         } catch (error) {
             console.error('Error fetching salon data:', error);
+            toast.error('Error al cargar el salón');
         } finally {
             setLoading(false);
         }
     }
 
+    // --- NUEVA FUNCIÓN: Renombrar Mesa ---
+    const handleRenameTable = async (e: React.MouseEvent, table: any) => {
+        e.stopPropagation(); // Evita que se abra el modal del POS al hacer clic en el lápiz
+        const newName = window.prompt('Ingresá el nuevo nombre para la mesa:', table.name);
+        
+        if (!newName || newName.trim() === '' || newName === table.name) return;
+
+        try {
+            const { error } = await supabase
+                .from('resources')
+                .update({ name: newName.trim() })
+                .eq('id', table.id);
+
+            if (error) throw error;
+            toast.success('Mesa renombrada con éxito');
+            fetchSalonData();
+        } catch (error) {
+            toast.error('No se pudo renombrar la mesa');
+        }
+    };
+
     return (
-        <div>
+        <div className="pb-24 lg:pb-0 animate-in fade-in duration-500">
             <CreateTableModal
                 isOpen={isCreateModalOpen}
                 onClose={() => setIsCreateModalOpen(false)}
@@ -81,14 +102,13 @@ export default function Salon() {
 
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
                 <div>
-                    <h1 className="text-3xl font-bold text-slate-800">Mapa del Salón</h1>
-                    <p className="text-slate-500">Gestión de mesas y comandas activas.</p>
+                    <h1 className="text-2xl sm:text-3xl font-black text-slate-800 tracking-tight">Mapa del Salón</h1>
+                    <p className="text-sm sm:text-base text-slate-500 mt-1">Gestión de mesas y comandas activas.</p>
                 </div>
-                {/* BLINDAJE VISUAL: Solo dueños/admins ven el botón de Nueva Mesa */}
                 {isOwnerOrAdmin && (
                     <button
                         onClick={() => setIsCreateModalOpen(true)}
-                        className="bg-brand-500 hover:bg-brand-600 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 font-medium shadow-lg shadow-brand-500/20 transition-colors"
+                        className="w-full sm:w-auto bg-brand-600 hover:bg-brand-500 text-white px-5 py-3 rounded-xl flex items-center justify-center gap-2 font-bold shadow-lg shadow-brand-500/30 transition-all active:scale-95"
                     >
                         <Plus className="w-5 h-5" />
                         Nueva Mesa
@@ -97,15 +117,18 @@ export default function Salon() {
             </div>
 
             {loading ? (
-                <div className="p-12 text-center text-slate-500">Cargando salón...</div>
+                <div className="p-12 text-center text-slate-400 font-medium">Cargando disposición del salón...</div>
             ) : tables.length === 0 ? (
-                <div className="bg-white p-12 rounded-2xl border border-slate-200 text-center flex flex-col items-center">
-                    <LayoutGrid className="w-16 h-16 text-slate-300 mb-4" />
-                    <h3 className="text-lg font-bold text-slate-700">El salón está vacío</h3>
-                    <p className="text-slate-500 mt-2">Creá tus mesas para empezar a tomar pedidos.</p>
+                <div className="bg-white p-12 rounded-3xl border border-slate-100 text-center flex flex-col items-center shadow-sm">
+                    <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-4">
+                        <LayoutGrid className="w-10 h-10 text-slate-300" />
+                    </div>
+                    <h3 className="text-xl font-bold text-slate-700">El salón está vacío</h3>
+                    <p className="text-slate-500 mt-2 max-w-md">Creá tu primera mesa para empezar a tomar pedidos y organizar tu espacio.</p>
                 </div>
             ) : (
-                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                /* Grilla mejorada para móviles (1 col en celus muy chicos, 2 normales, etc) */
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4 sm:gap-6">
                     {tables.map((table) => {
                         const isOccupied = !!table.activeOrder;
                         
@@ -113,25 +136,40 @@ export default function Salon() {
                             <div 
                                 key={table.id} 
                                 onClick={() => setSelectedTable(table)}
-                                className={`bg-white border-2 rounded-2xl p-6 cursor-pointer transition-all flex flex-col items-center justify-center gap-2 shadow-sm relative group overflow-hidden ${
+                                className={`bg-white rounded-3xl p-6 cursor-pointer transition-all flex flex-col items-center justify-center gap-3 relative group overflow-hidden ${
                                     isOccupied 
-                                    ? 'border-red-400 hover:bg-red-50'
-                                    : 'border-emerald-400 hover:bg-emerald-50'
+                                    ? 'shadow-md shadow-red-500/10 border-2 border-red-100 hover:border-red-300'
+                                    : 'shadow-sm border-2 border-slate-100 hover:border-emerald-300 hover:shadow-md hover:shadow-emerald-500/10'
                                 }`}
                             >
-                                <div className={`absolute top-0 left-0 w-full h-1 ${isOccupied ? 'bg-red-400' : 'bg-emerald-400'}`}></div>
+                                {/* Barra de estado superior */}
+                                <div className={`absolute top-0 left-0 w-full h-1.5 transition-colors ${isOccupied ? 'bg-red-500' : 'bg-emerald-400'}`}></div>
 
-                                <Armchair className={`w-8 h-8 ${isOccupied ? 'text-red-500' : 'text-emerald-600'}`} />
-                                <h3 className="font-black text-slate-800 text-lg">{table.name}</h3>
+                                {/* Botón de Edición (Solo Dueños) */}
+                                {isOwnerOrAdmin && (
+                                    <button 
+                                        onClick={(e) => handleRenameTable(e, table)}
+                                        className="absolute top-3 right-3 p-2 bg-slate-50 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg opacity-0 md:group-hover:opacity-100 transition-all focus:opacity-100"
+                                        title="Renombrar Mesa"
+                                    >
+                                        <Pencil className="w-4 h-4" />
+                                    </button>
+                                )}
+
+                                <div className={`w-16 h-16 rounded-2xl flex items-center justify-center ${isOccupied ? 'bg-red-50 text-red-500' : 'bg-slate-50 text-emerald-500'}`}>
+                                    <Armchair className="w-8 h-8" />
+                                </div>
+                                
+                                <h3 className="font-black text-slate-800 text-xl">{table.name}</h3>
                                 
                                 {isOccupied ? (
-                                    <div className="flex items-center gap-1 text-xs font-bold text-red-600 bg-red-100 px-3 py-1 rounded-md mt-1">
-                                        <Receipt className="w-3 h-3" /> 
+                                    <div className="flex items-center gap-1.5 text-sm font-bold text-red-600 bg-red-50 px-4 py-1.5 rounded-lg border border-red-100">
+                                        <Receipt className="w-4 h-4" /> 
                                         ${table.activeOrder.total_amount.toLocaleString()}
                                     </div>
                                 ) : (
-                                    <div className="flex items-center gap-1 text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded-md">
-                                        <Users className="w-3 h-3" /> {table.capacity} Libres
+                                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-lg">
+                                        <Users className="w-4 h-4" /> {table.capacity} Libres
                                     </div>
                                 )}
                             </div>
