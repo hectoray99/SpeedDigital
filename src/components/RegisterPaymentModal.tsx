@@ -2,6 +2,7 @@ import { useState, useRef, Fragment } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { supabase } from '../lib/supabase';
 import { uploadToCloudinary } from '../services/cloudinary';
+import { useAuthStore } from '../store/authStore';
 import { X, Loader2, DollarSign, Wallet, Upload, FileText, Banknote, CreditCard, SmartphoneNfc } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -18,31 +19,26 @@ interface Props {
 }
 
 export default function RegisterPaymentModal({ isOpen, onClose, onSuccess, receivable }: Props) {
+    const { orgData } = useAuthStore(); 
+    
     const [loading, setLoading] = useState(false);
     const [paymentMethod, setPaymentMethod] = useState('cash');
     const [file, setFile] = useState<File | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // Si no hay deuda seleccionada, no tiene sentido renderizar la lógica
     if (!receivable) return null;
 
-    // Leemos el concepto del ticket para mostrarlo en pantalla
     const conceptDisplay = receivable.metadata?.concept || 'Deuda Pendiente';
 
     const handlePayment = async () => {
+        if (!orgData?.id) {
+            toast.error('Error de sesión. Por favor recargá la página.');
+            return;
+        }
+
         setLoading(true);
         try {
-            // 1. Obtener contexto del usuario actual
-            const { data: { user } } = await supabase.auth.getUser();
-            const { data: profile } = await supabase
-                .from('profiles')
-                .select('organization_id')
-                .eq('id', user?.id)
-                .single();
-
-            if (!profile) throw new Error('Error de sesión o permisos insuficientes.');
-
-            // 2. Subir comprobante a Cloudinary (Si existe)
+            // 1. Subir comprobante a Cloudinary (Si existe)
             let proofUrl = null;
             if (file) {
                 toast.loading('Subiendo comprobante...', { id: 'upload_proof' });
@@ -51,9 +47,36 @@ export default function RegisterPaymentModal({ isOpen, onClose, onSuccess, recei
                 if (!proofUrl) throw new Error('Error al guardar la imagen en la nube.');
             }
 
-            // 3. Crear el Ingreso de Caja en la tabla 'finance_ledger'
+            // =====================================================================
+            // 2. BLOQUEO ANTI-CONCURRENCIA (La magia contra el error de Edu)
+            // Intentamos actualizar la operación SOLO si sigue 'pending'
+            // =====================================================================
+            const { data: updatedOp, error: updateError } = await supabase
+                .from('operations')
+                .update({
+                    status: 'paid',
+                    balance: 0
+                })
+                .eq('id', receivable.id)
+                .eq('organization_id', orgData.id)
+                .eq('status', 'pending') // <- CONDICIÓN CLAVE
+                .select()
+                .maybeSingle();
+
+            if (updateError) throw updateError;
+
+            // Si updatedOp es null, significa que 0 filas fueron actualizadas.
+            // Esto pasa si la Compu B llega tarde y la Compu A ya lo pasó a 'paid'.
+            if (!updatedOp) {
+                toast.error('Transacción rechazada: Esta deuda ya fue saldada desde otra terminal.');
+                onSuccess(); // Refrescamos para que desaparezca de la lista
+                onClose();
+                return;
+            }
+
+            // 3. Si ganamos la carrera (somos la Compu A), registramos la plata en la Caja
             const { error: ledgerError } = await supabase.from('finance_ledger').insert({
-                organization_id: profile.organization_id,
+                organization_id: orgData.id, 
                 operation_id: receivable.id,
                 person_id: receivable.person_id,
                 type: 'income',
@@ -61,26 +84,19 @@ export default function RegisterPaymentModal({ isOpen, onClose, onSuccess, recei
                 payment_method: paymentMethod,
                 proof_url: proofUrl,
                 processed_at: new Date(),
-                notes: `Pago de Deuda: ${conceptDisplay}` // Agregamos nota clara para arqueo
+                notes: `Pago de Deuda: ${conceptDisplay}`
             });
 
-            if (ledgerError) throw ledgerError;
-
-            // 4. Actualizar el estado de la Deuda Original ('pending' -> 'paid')
-            const { error: updateError } = await supabase
-                .from('operations')
-                .update({
-                    status: 'paid',
-                    balance: 0
-                })
-                .eq('id', receivable.id);
-
-            if (updateError) throw updateError;
+            if (ledgerError) {
+                // Si justo se corta internet y la caja falla, hacemos un "Rollback" (Devolvemos la deuda)
+                await supabase.from('operations').update({ status: 'pending', balance: receivable.balance }).eq('id', receivable.id);
+                throw ledgerError;
+            }
 
             toast.success('¡Cobro registrado y deuda saldada!');
-            onSuccess(); // Refresca las listas de deudores en el componente padre
+            onSuccess(); 
             onClose();
-            setFile(null); // Limpiamos el comprobante para la próxima
+            setFile(null); 
 
         } catch (error: any) {
             console.error(error);

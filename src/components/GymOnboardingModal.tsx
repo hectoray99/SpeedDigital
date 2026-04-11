@@ -38,7 +38,7 @@ export default function GymOnboardingModal({ isOpen, onClose, onSuccess }: GymOn
 
     // Planes (Suscripciones)
     const [plans, setPlans] = useState<any[]>([]);
-    const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null); 
+    const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
 
     // =========================================================================
     // INICIALIZACIÓN Y BÚSQUEDA DE PLANES
@@ -97,11 +97,11 @@ export default function GymOnboardingModal({ isOpen, onClose, onSuccess }: GymOn
         if (!formData.full_name || !formData.identifier) {
             return toast.error("Completá nombre y DNI del alumno.");
         }
-        if (!orgData?.id) return; 
+        if (!orgData?.id) return;
 
         // --- BLINDAJE DE DATOS (REGEX) ---
         const nameRegex = /^[a-zA-ZÀ-ÿ\s']+$/; // Permite tildes, espacios y apóstrofes
-        const phoneRegex = /^[0-9+\-\s()]+$/; 
+        const phoneRegex = /^[0-9+\-\s()]+$/;
 
         if (!nameRegex.test(formData.full_name.trim())) {
             return toast.error('El nombre solo puede contener letras y espacios.');
@@ -148,7 +148,7 @@ export default function GymOnboardingModal({ isOpen, onClose, onSuccess }: GymOn
                 if (selectedPlan) {
                     const planProps = selectedPlan.properties || {};
                     const isClasses = planProps.plan_mode === 'classes';
-                    
+
                     const expiresAt = new Date();
                     expiresAt.setDate(expiresAt.getDate() + 30);
 
@@ -172,11 +172,11 @@ export default function GymOnboardingModal({ isOpen, onClose, onSuccess }: GymOn
                     identifier: formData.identifier.trim(),
                     phone: formData.phone.trim(),
                     type: 'client',
-                    portal_password: formData.identifier.trim(), 
+                    portal_password: formData.identifier.trim(),
                     details: {
                         photo_url: photoUrl,
                         registered_at: new Date().toISOString(),
-                        active_plans: activePlansArray 
+                        active_plans: activePlansArray
                     }
                 }])
                 .select('id')
@@ -263,11 +263,11 @@ export default function GymOnboardingModal({ isOpen, onClose, onSuccess }: GymOn
                                 </div>
 
                                 <div className="p-6 overflow-y-auto max-h-[75vh]">
-                                    
+
                                     {/* --- PASO 1: FOTO Y DATOS --- */}
                                     {step === 1 && (
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in fade-in slide-in-from-right-4 duration-300">
-                                            
+
                                             <div className="space-y-5">
                                                 <div>
                                                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">DNI (Obligatorio para Check-in) *</label>
@@ -277,7 +277,10 @@ export default function GymOnboardingModal({ isOpen, onClose, onSuccess }: GymOn
                                                         placeholder="Ej: 35123456"
                                                         className="w-full px-4 py-3.5 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none transition-all font-bold text-slate-800"
                                                         value={formData.identifier}
-                                                        onChange={e => setFormData({ ...formData, identifier: e.target.value })}
+                                                        onChange={(e) => {
+                                                            const soloNumeros = e.target.value.replace(/\D/g, '');
+                                                            setFormData({ ...formData, identifier: soloNumeros });
+                                                        }}
                                                     />
                                                 </div>
                                                 <div>
@@ -297,7 +300,9 @@ export default function GymOnboardingModal({ isOpen, onClose, onSuccess }: GymOn
                                                         placeholder="Ej: 3704123456"
                                                         className="w-full px-4 py-3.5 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:ring-2 focus:ring-brand-500/20 outline-none transition-all font-medium text-slate-800 text-sm"
                                                         value={formData.phone}
-                                                        onChange={e => setFormData({ ...formData, phone: e.target.value })}
+                                                        onChange={e => {
+                                                            const soloNumeros = e.target.value.replace(/\D/g, '');
+                                                            setFormData({ ...formData, phone: soloNumeros })}}
                                                     />
                                                 </div>
                                             </div>
@@ -305,7 +310,7 @@ export default function GymOnboardingModal({ isOpen, onClose, onSuccess }: GymOn
                                             {/* Manejo de Cámara */}
                                             <div className="flex flex-col items-center justify-center bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200 p-4 relative h-full min-h-[250px]">
                                                 <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*" className="hidden" />
-                                                
+
                                                 {!capturedImage ? (
                                                     <div className="w-full h-full max-w-[250px] overflow-hidden rounded-2xl shadow-inner bg-black relative group">
                                                         <Webcam
@@ -361,7 +366,7 @@ export default function GymOnboardingModal({ isOpen, onClose, onSuccess }: GymOn
                                                         Seleccionar un plan generará una deuda automática para que el alumno pague en Caja. <b>Si no seleccionás ninguno, el alumno se guardará igual</b>.
                                                     </div>
                                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                                        
+
                                                         {/* OPCIÓN: SIN PLAN */}
                                                         <label className={`relative flex flex-col p-6 cursor-pointer rounded-2xl border-2 transition-all ${selectedPlanId === null ? 'border-brand-500 bg-brand-50 shadow-md' : 'border-slate-200 hover:border-brand-300 bg-white'}`}>
                                                             <input type="radio" className="sr-only" value="" checked={selectedPlanId === null} onChange={() => setSelectedPlanId(null)} />
