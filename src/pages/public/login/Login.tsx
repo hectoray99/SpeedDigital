@@ -1,16 +1,30 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { supabase } from '../../../lib/supabase';
 import { Zap, Loader2, ArrowLeft, Mail, Lock } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function Login() {
+    const [searchParams] = useSearchParams();
     const navigate = useNavigate();
+    
     const [loading, setLoading] = useState(false);
     const [isSignUp, setIsSignUp] = useState(false);
     const [formData, setFormData] = useState({ email: '', password: '' });
 
+    // =========================================================================
+    // INICIALIZACIÓN Y CAPTURA DE PROMOCIONES
+    // =========================================================================
     useEffect(() => {
+        const promo = searchParams.get('promo');
+        if (promo) {
+            // Guardamos el cupón en la memoria para aplicarlo después del Onboarding
+            localStorage.setItem('speeddigital_promo', promo);
+        }
+    }, [searchParams]);
+
+    useEffect(() => {
+        // Redirigir al dashboard si ya está logueado
         const checkSession = async () => {
             const { data: { session } } = await supabase.auth.getSession();
             if (session) {
@@ -20,18 +34,24 @@ export default function Login() {
         checkSession();
     }, [navigate]);
 
+    // =========================================================================
+    // HANDLERS DE AUTENTICACIÓN
+    // =========================================================================
     const handleEmailAuth = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
+        
         try {
             if (isSignUp) {
+                // REGISTRO
                 const { error } = await supabase.auth.signUp({
                     email: formData.email,
                     password: formData.password,
                 });
                 if (error) throw error;
-                toast.success('Cuenta creada. ¡Revisá tu email para confirmar!');
+                toast.success('¡Cuenta creada! Revisá tu email para confirmar y activarla.');
             } else {
+                // LOGIN
                 const { error } = await supabase.auth.signInWithPassword({
                     email: formData.email,
                     password: formData.password,
@@ -41,7 +61,7 @@ export default function Login() {
             }
         } catch (error: any) {
             console.error(error);
-            toast.error(error.message || 'Error de autenticación');
+            toast.error(error.message || 'Error de autenticación. Verificá tus credenciales.');
         } finally {
             setLoading(false);
         }
@@ -53,19 +73,23 @@ export default function Login() {
             const { error } = await supabase.auth.signInWithOAuth({
                 provider: 'google',
                 options: {
+                    // El AuthCallback se encarga de recibir la respuesta y mandar al Onboarding o Dashboard
                     redirectTo: `${window.location.origin}/auth/callback`,
                 },
             });
             if (error) throw error;
         } catch (error: any) {
             console.error(error);
-            toast.error('Error al conectar con Google');
+            toast.error('Error al intentar conectar con Google.');
             setLoading(false);
         }
     };
 
+    // =========================================================================
+    // RENDER PRINCIPAL
+    // =========================================================================
     return (
-        <div className="min-h-screen bg-[#050505] flex flex-col justify-center py-12 sm:px-6 lg:px-8 relative overflow-hidden font-sans selection:bg-brand-500/30 selection:text-white text-slate-200">
+        <div className="min-h-[100dvh] bg-[#050505] flex flex-col justify-center py-12 sm:px-6 lg:px-8 relative overflow-hidden font-sans selection:bg-brand-500/30 selection:text-white text-slate-200">
             
             {/* FONDO ANIMADO Y TEXTURA */}
             <div className="absolute inset-0 z-0 pointer-events-none">
@@ -74,37 +98,38 @@ export default function Login() {
                 <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-[0.03]"></div>
             </div>
 
-            <div className="absolute top-8 left-4 md:left-8 z-20">
-                <Link to="/" className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors font-medium px-4 py-2 bg-white/5 border border-white/10 rounded-full backdrop-blur-sm">
-                    <ArrowLeft className="w-4 h-4" /> Volver al inicio
+            {/* BOTÓN VOLVER (Fuera del flujo de cajas para no romper flexbox) */}
+            <div className="absolute top-4 left-4 md:top-8 md:left-8 z-20">
+                <Link to="/" className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors font-bold px-4 py-2 bg-white/5 border border-white/10 rounded-full backdrop-blur-sm active:scale-95 text-sm md:text-base">
+                    <ArrowLeft className="w-4 h-4 md:w-5 md:h-5" /> Volver al inicio
                 </Link>
             </div>
 
-            <div className="sm:mx-auto sm:w-full sm:max-w-md text-center relative z-10 mt-8 md:mt-0">
-                <div className="inline-flex bg-gradient-to-tr from-brand-600 to-indigo-600 p-4 rounded-3xl shadow-xl shadow-brand-500/30 mb-8 border border-white/10">
+            <div className="sm:mx-auto sm:w-full sm:max-w-md text-center relative z-10 mt-12 md:mt-0 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="inline-flex bg-gradient-to-tr from-brand-600 to-indigo-600 p-4 rounded-3xl shadow-xl shadow-brand-500/30 mb-8 border border-white/10 transform rotate-3">
                     <Zap className="w-10 h-10 text-white" />
                 </div>
                 <h2 className="text-3xl md:text-4xl font-black text-white tracking-tight mb-2">
                     {isSignUp ? 'Creá tu cuenta gratis' : 'Ingresá a tu cuenta'}
                 </h2>
-                <p className="text-base text-slate-400">
+                <p className="text-base text-slate-400 font-medium">
                     {isSignUp ? 'Empezá a gestionar tu negocio hoy mismo.' : 'Gestioná tu negocio de forma inteligente.'}
                 </p>
             </div>
 
-            <div className="mt-10 sm:mx-auto sm:w-full sm:max-w-md relative z-10">
-                <div className="bg-[#0A0A0A] py-10 px-6 sm:px-10 shadow-2xl rounded-[2.5rem] border border-white/10 backdrop-blur-xl">
+            <div className="mt-10 sm:mx-auto sm:w-full sm:max-w-md relative z-10 animate-in fade-in slide-in-from-bottom-8 duration-700">
+                <div className="bg-[#0A0A0A]/80 py-10 px-6 sm:px-10 shadow-2xl rounded-[2.5rem] border border-white/10 backdrop-blur-xl">
 
                     <form onSubmit={handleEmailAuth} className="space-y-5 mb-8">
                         <div>
-                            <label className="block text-sm font-bold text-slate-300 mb-2">Correo Electrónico</label>
+                            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 ml-1">Correo Electrónico</label>
                             <div className="relative">
                                 <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 w-5 h-5" />
                                 <input
                                     type="email"
                                     required
                                     placeholder="hola@tunegocio.com"
-                                    className="w-full pl-12 pr-4 py-4 rounded-xl bg-white/5 border border-white/10 focus:border-brand-500 focus:bg-white/10 focus:ring-2 focus:ring-brand-500/20 outline-none text-white font-medium transition-all"
+                                    className="w-full pl-12 pr-4 py-4 rounded-2xl bg-white/5 border border-white/10 focus:border-brand-500 focus:bg-white/10 focus:ring-2 focus:ring-brand-500/20 outline-none text-white font-bold transition-all"
                                     value={formData.email}
                                     onChange={e => setFormData({ ...formData, email: e.target.value })}
                                 />
@@ -112,14 +137,14 @@ export default function Login() {
                         </div>
 
                         <div>
-                            <label className="block text-sm font-bold text-slate-300 mb-2">Contraseña</label>
+                            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 ml-1">Contraseña</label>
                             <div className="relative">
                                 <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 w-5 h-5" />
                                 <input
                                     type="password"
                                     required
                                     placeholder="••••••••"
-                                    className="w-full pl-12 pr-4 py-4 rounded-xl bg-white/5 border border-white/10 focus:border-brand-500 focus:bg-white/10 focus:ring-2 focus:ring-brand-500/20 outline-none text-white font-medium transition-all"
+                                    className="w-full pl-12 pr-4 py-4 rounded-2xl bg-white/5 border border-white/10 focus:border-brand-500 focus:bg-white/10 focus:ring-2 focus:ring-brand-500/20 outline-none text-white font-bold transition-all tracking-wider"
                                     value={formData.password}
                                     onChange={e => setFormData({ ...formData, password: e.target.value })}
                                 />
@@ -129,25 +154,27 @@ export default function Login() {
                         <button
                             type="submit"
                             disabled={loading}
-                            className="w-full flex justify-center py-4 px-4 border border-transparent rounded-xl shadow-lg shadow-brand-500/20 text-base font-bold text-white bg-brand-600 hover:bg-brand-500 transition-all disabled:opacity-50 active:scale-95 mt-2"
+                            className="w-full flex justify-center items-center gap-2 py-4 px-4 rounded-2xl shadow-xl shadow-brand-500/20 text-lg font-black text-white bg-brand-600 hover:bg-brand-500 transition-all disabled:opacity-50 active:scale-95 mt-4"
                         >
-                            {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : (isSignUp ? 'Registrarme' : 'Ingresar')}
+                            {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : (isSignUp ? 'Registrarme ahora' : 'Ingresar al sistema')}
                         </button>
                     </form>
 
+                    {/* Divisor Visual */}
                     <div className="relative mb-8">
                         <div className="absolute inset-0 flex items-center">
                             <div className="w-full border-t border-white/10" />
                         </div>
                         <div className="relative flex justify-center text-sm">
-                            <span className="px-4 bg-[#0A0A0A] text-slate-500 font-medium">O continuá con</span>
+                            <span className="px-4 bg-[#0A0A0A] text-slate-500 font-bold uppercase tracking-widest text-[10px]">O continuá con</span>
                         </div>
                     </div>
 
+                    {/* Google Auth */}
                     <button
                         onClick={handleGoogleLogin}
                         disabled={loading}
-                        className="w-full flex justify-center items-center gap-3 py-4 px-4 border border-white/10 rounded-xl shadow-sm bg-white/5 text-base font-bold text-white hover:bg-white/10 transition-all disabled:opacity-50 active:scale-95"
+                        className="w-full flex justify-center items-center gap-3 py-4 px-4 border border-white/10 rounded-2xl shadow-sm bg-white/5 text-base font-bold text-white hover:bg-white/10 transition-all disabled:opacity-50 active:scale-95"
                     >
                         <svg className="h-5 w-5" aria-hidden="true" viewBox="0 0 24 24">
                             <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
@@ -161,7 +188,7 @@ export default function Login() {
                     <div className="mt-8 text-center">
                         <button
                             onClick={() => setIsSignUp(!isSignUp)}
-                            className="text-sm font-bold text-brand-400 hover:text-brand-300 transition-colors"
+                            className="text-sm font-bold text-brand-400 hover:text-brand-300 transition-colors focus:outline-none"
                         >
                             {isSignUp ? '¿Ya tenés cuenta? Ingresá' : '¿No tenés cuenta? Registrate gratis'}
                         </button>

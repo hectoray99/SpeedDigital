@@ -12,10 +12,13 @@ export default function ChangePasswordModal({ isOpen, onClose }: Props) {
     const [loading, setLoading] = useState(false);
     const [newPassword, setNewPassword] = useState('');
 
+    // Si el modal está cerrado, no renderizamos nada
     if (!isOpen) return null;
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        
+        // Validación de longitud mínima
         if (newPassword.length < 6) {
             toast.error('La contraseña debe tener al menos 6 caracteres');
             return;
@@ -23,7 +26,7 @@ export default function ChangePasswordModal({ isOpen, onClose }: Props) {
         setLoading(true);
 
         try {
-            // Actualizamos la contraseña del usuario AUTENTICADO en Supabase Auth
+            // Actualizamos la contraseña del usuario AUTENTICADO en la sesión actual
             const { error } = await supabase.auth.updateUser({
                 password: newPassword
             });
@@ -42,34 +45,42 @@ export default function ChangePasswordModal({ isOpen, onClose }: Props) {
     };
 
     return (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-white text-slate-900 rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-[99999] p-4 animate-in fade-in duration-200">
+            <div className="bg-white text-slate-900 rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200">
 
-                <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                    <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                    <h2 className="text-xl font-black text-slate-800 flex items-center gap-2">
                         <Lock className="w-5 h-5 text-brand-600" />
                         Cambiar Contraseña
                     </h2>
-                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
+                    <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-xl transition-colors">
                         <X className="w-5 h-5" />
                     </button>
                 </div>
 
-                <form onSubmit={handleSubmit} className="p-6 space-y-4">
+                <form onSubmit={handleSubmit} className="p-6 md:p-8 space-y-6">
                     <div>
-                        <label className="block text-xs font-medium text-slate-700 mb-1">Nueva Contraseña</label>
-                        <input
-                            required
-                            type="password"
-                            placeholder="Mínimo 6 caracteres..."
-                            className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-brand-500/20 outline-none"
-                            value={newPassword}
-                            onChange={e => setNewPassword(e.target.value)}
-                        />
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Nueva Contraseña</label>
+                        <div className="relative shadow-sm rounded-xl">
+                            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
+                            <input
+                                required
+                                autoFocus
+                                type="password"
+                                placeholder="Mínimo 6 caracteres..."
+                                className="w-full pl-11 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500/20 focus:bg-white font-bold outline-none transition-all text-slate-800"
+                                value={newPassword}
+                                onChange={e => setNewPassword(e.target.value)}
+                            />
+                        </div>
                     </div>
 
-                    <button type="submit" disabled={loading} className="w-full bg-brand-600 hover:bg-brand-700 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2">
-                        {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    <button 
+                        type="submit" 
+                        disabled={loading} 
+                        className="w-full bg-slate-900 hover:bg-black text-white py-4 rounded-xl font-black flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50 shadow-xl shadow-slate-900/20 text-lg"
+                    >
+                        {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
                         Guardar Nueva Clave
                     </button>
                 </form>

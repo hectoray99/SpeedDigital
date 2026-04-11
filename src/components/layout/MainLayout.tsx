@@ -20,13 +20,22 @@ export default function MainLayout() {
         navigate('/');
     };
 
+    // 1. Pantalla de Carga Inicial
     if (isLoading) {
-        return <div className="min-h-screen flex items-center justify-center bg-slate-50"><Loader2 className="w-10 h-10 animate-spin text-brand-500" /></div>;
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-slate-50">
+                <Loader2 className="w-10 h-10 animate-spin text-brand-500" />
+            </div>
+        );
     }
 
+    // 2. Protecciones de Seguridad
     if (!user) return <Navigate to="/login" replace />;
-    if (!orgData) return null;
+    if (!orgData) return null; // El AuthGuard ya se encarga de redirigir al Onboarding si pasa esto
 
+    // =========================================================================
+    // CONFIGURACIÓN DINÁMICA DEL MENÚ SEGÚN INDUSTRIA
+    // =========================================================================
     const getMenuLabels = (industry: string) => {
         switch (industry) {
             case 'gym':
@@ -49,6 +58,7 @@ export default function MainLayout() {
     const isGastro = orgData.industry === 'gastronomy';
     const isServices = orgData.industry === 'services' || orgData.industry === 'sports';
     
+    // Armado del array de rutas permitidas
     const menuItems = [
         ...(isOwnerOrAdmin ? [{ icon: LayoutDashboard, label: 'Panel Principal', path: '/admin/dashboard' }] : []),
         ...(isGastro ? [
@@ -71,45 +81,9 @@ export default function MainLayout() {
         ] : []),
     ];
 
-    const NavLinks = () => (
-        <nav className="flex-1 p-4 space-y-1.5 overflow-y-auto hide-scrollbar">
-            {menuItems.map((item) => {
-                const isActive = location.pathname.startsWith(item.path);
-                return (
-                    <Link
-                        key={item.path}
-                        to={item.path}
-                        onClick={() => setIsMobileMenuOpen(false)}
-                        className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group ${isActive
-                            ? 'bg-brand-500 text-white shadow-md shadow-brand-500/20'
-                            : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-                            }`}
-                    >
-                        <item.icon className={`w-5 h-5 ${isActive ? 'animate-pulse' : ''}`} />
-                        <span className="font-bold text-sm tracking-wide">{item.label}</span>
-                    </Link>
-                );
-            })}
-
-            {orgData.slug && (
-                <div className="pt-4 mt-4 border-t border-slate-800">
-                    <p className="px-4 text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Público</p>
-                    <a
-                        href={isGastro ? `/m/${orgData.slug}` : `/p/${orgData.slug}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center justify-between px-4 py-3 rounded-xl text-brand-400 hover:bg-brand-500/10 hover:text-brand-300 transition-all duration-200 group border border-brand-500/20"
-                    >
-                        <div className="flex items-center gap-3">
-                            <ExternalLink className="w-5 h-5 group-hover:scale-110 transition-transform" />
-                            <span className="font-bold text-sm tracking-wide">{labels.publicLabel}</span>
-                        </div>
-                    </a>
-                </div>
-            )}
-        </nav>
-    );
-
+    // =========================================================================
+    // RENDER: ESTRUCTURA DEL LAYOUT PRINCIPAL
+    // =========================================================================
     return (
         <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row font-sans">
 
@@ -124,27 +98,54 @@ export default function MainLayout() {
                         {userRole || 'STAFF'}
                     </span>
                 </div>
-                <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 bg-slate-800 rounded-lg text-slate-300 hover:text-white">
+                <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 bg-slate-800 rounded-lg text-slate-300 hover:text-white transition-colors">
                     <Menu className="w-6 h-6" />
                 </button>
             </div>
 
-            {/* --- MENÚ MÓVIL DESPLEGABLE --- */}
+            {/* --- MENÚ MÓVIL DESPLEGABLE (OVERLAY) --- */}
             {isMobileMenuOpen && (
                 <div className="fixed inset-0 z-[100] md:hidden flex">
                     <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300" onClick={() => setIsMobileMenuOpen(false)} />
                     <aside className="relative w-4/5 max-w-sm bg-slate-900 text-white flex flex-col shadow-2xl animate-in slide-in-from-left duration-300 border-r border-slate-800">
+                        
                         <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-950">
                             <h1 className="text-xl font-black text-white truncate pr-2 tracking-tight">{orgData.name}</h1>
-                            <button onClick={() => setIsMobileMenuOpen(false)} className="p-2 bg-slate-800 rounded-lg hover:bg-slate-700">
+                            <button onClick={() => setIsMobileMenuOpen(false)} className="p-2 bg-slate-800 rounded-lg hover:bg-slate-700 transition-colors">
                                 <X className="w-5 h-5 text-slate-400" />
                             </button>
                         </div>
-                        <NavLinks />
+                        
+                        {/* Links del Menú Móvil */}
+                        <nav className="flex-1 p-4 space-y-1.5 overflow-y-auto hide-scrollbar">
+                            {menuItems.map((item) => {
+                                const isActive = location.pathname.startsWith(item.path);
+                                return (
+                                    <Link key={item.path} to={item.path} onClick={() => setIsMobileMenuOpen(false)} className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group ${isActive ? 'bg-brand-500 text-white shadow-md shadow-brand-500/20' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
+                                        <item.icon className={`w-5 h-5 ${isActive ? 'animate-pulse' : ''}`} />
+                                        <span className="font-bold text-sm tracking-wide">{item.label}</span>
+                                    </Link>
+                                );
+                            })}
+
+                            {/* Link a la Pantalla Pública */}
+                            {orgData.slug && (
+                                <div className="pt-4 mt-4 border-t border-slate-800">
+                                    <p className="px-4 text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Público</p>
+                                    <a href={isGastro ? `/m/${orgData.slug}` : `/p/${orgData.slug}`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between px-4 py-3 rounded-xl text-brand-400 hover:bg-brand-500/10 hover:text-brand-300 transition-all duration-200 group border border-brand-500/20">
+                                        <div className="flex items-center gap-3">
+                                            <ExternalLink className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                                            <span className="font-bold text-sm tracking-wide">{labels.publicLabel}</span>
+                                        </div>
+                                    </a>
+                                </div>
+                            )}
+                        </nav>
+
+                        {/* Footer del Menú Móvil */}
                         <div className="p-4 border-t border-slate-800 bg-slate-950">
                             <button onClick={handleLogout} className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white rounded-xl font-bold transition-colors">
-                                <LogOut className="w-5 h-5" />
-                                Cerrar Sesión
+                                <LogOut className="w-5 h-5" /> Cerrar Sesión
                             </button>
                         </div>
                     </aside>
@@ -161,18 +162,43 @@ export default function MainLayout() {
                         </p>
                     </div>
                 </div>
-                <NavLinks />
+
+                {/* Links del Menú Escritorio */}
+                <nav className="flex-1 p-4 space-y-1.5 overflow-y-auto hide-scrollbar">
+                    {menuItems.map((item) => {
+                        const isActive = location.pathname.startsWith(item.path);
+                        return (
+                            <Link key={item.path} to={item.path} className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group ${isActive ? 'bg-brand-500 text-white shadow-md shadow-brand-500/20' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
+                                <item.icon className={`w-5 h-5 ${isActive ? 'animate-pulse' : ''}`} />
+                                <span className="font-bold text-sm tracking-wide">{item.label}</span>
+                            </Link>
+                        );
+                    })}
+
+                    {orgData.slug && (
+                        <div className="pt-4 mt-4 border-t border-slate-800">
+                            <p className="px-4 text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Público</p>
+                            <a href={isGastro ? `/m/${orgData.slug}` : `/p/${orgData.slug}`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between px-4 py-3 rounded-xl text-brand-400 hover:bg-brand-500/10 hover:text-brand-300 transition-all duration-200 group border border-brand-500/20">
+                                <div className="flex items-center gap-3">
+                                    <ExternalLink className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                                    <span className="font-bold text-sm tracking-wide">{labels.publicLabel}</span>
+                                </div>
+                            </a>
+                        </div>
+                    )}
+                </nav>
+
                 <div className="p-4 border-t border-slate-800 bg-slate-950">
                     <button onClick={handleLogout} className="flex items-center gap-3 w-full px-4 py-3 text-slate-400 hover:bg-red-500/10 hover:text-red-400 rounded-xl font-bold transition-colors">
-                        <LogOut className="w-5 h-5" />
-                        Cerrar Sesión
+                        <LogOut className="w-5 h-5" /> Cerrar Sesión
                     </button>
                 </div>
             </aside>
 
-            {/* --- CONTENIDO PRINCIPAL --- */}
+            {/* --- CONTENIDO PRINCIPAL (Acá se inyectan las páginas) --- */}
             <main className="flex-1 transition-all duration-300 md:ml-64">
                 <div className="p-4 sm:p-6 md:p-8 max-w-7xl mx-auto pb-24 md:pb-8">
+                    {/* Le pasamos orgData a todas las rutas hijas automáticamente */}
                     <Outlet context={{ orgData }} />
                 </div>
             </main>

@@ -25,47 +25,64 @@ export default function CreateStaffModal({ isOpen, onClose, onSuccess }: CreateS
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!orgData?.id || !orgData?.slug) return;
         
-        if (formData.pin.length < 4) {
-            return toast.error('El PIN debe tener al menos 4 dígitos');
+        // 1. Validaciones Base y Seguridad
+        if (!orgData?.id) return toast.error('Error de sesión. Recargá la página.');
+        
+        // Generamos un 'Slug Seguro' para armar el correo temporal (incluso si la org es nueva y no tiene slug oficial)
+        const safeSlug = orgData.slug ? orgData.slug.toLowerCase().replace(/[^a-z0-9]/g, '') : orgData.id.substring(0, 8);
+
+        if (!formData.full_name.trim()) return toast.error('El nombre completo es obligatorio.');
+        
+        // Regex 1: Solo letras sin tilde y números. Nada de espacios ni símbolos
+        const usernameRegex = /^[a-z0-9]+$/;
+        const cleanUsername = formData.username.toLowerCase().trim();
+        
+        if (!cleanUsername) return toast.error('El usuario es obligatorio.');
+        if (!usernameRegex.test(cleanUsername)) {
+            return toast.error('El usuario solo puede contener letras (sin acentos) y números, sin espacios.');
+        }
+
+        // Regex 2: Pin de seguridad de entre 4 a 6 números exactos
+        const pinRegex = /^[0-9]{4,6}$/;
+        if (!pinRegex.test(formData.pin)) {
+            return toast.error('El PIN debe tener entre 4 y 6 números.');
         }
 
         setLoading(true);
 
         try {
-            const cleanUsername = formData.username.replace(/\s+/g, '').toLowerCase().trim();
-            const dummyEmail = `${cleanUsername}@${orgData.slug}.pos`;
-            const securePassword = `${formData.pin}-pos`; 
+            // 2. Preparación de Credenciales Híbridas
+            const dummyEmail = `${cleanUsername}@${safeSlug}.pos`;
+            const securePassword = `${formData.pin}-pos-Secure!`; // Forzamos una contraseña que pase la política fuerte de Supabase
 
-            // Cliente temporal para no desloguear al dueño
+            // Creamos una instancia de Supabase temporal y "Muda" para registrar el usuario sin sobreescribir la sesión actual del dueño.
             const tempSupabase = createClient(
                 import.meta.env.VITE_SUPABASE_URL,
                 import.meta.env.VITE_SUPABASE_ANON_KEY,
                 { auth: { persistSession: false, autoRefreshToken: false } }
             );
 
-            // 1. Crear usuario en Auth (El Trigger de la BD crea el perfil automáticamente)
+            // 3. Registrar al usuario en Auth General
             const { data: authData, error: authError } = await tempSupabase.auth.signUp({
                 email: dummyEmail,
                 password: securePassword,
-                options: { data: { full_name: formData.full_name, is_staff: true } }
+                options: { data: { full_name: formData.full_name.trim(), is_staff: true } }
             });
   
             if (authError) {
-                // Manejo de error si el usuario ya existe
                 if (authError.message.includes('already registered') || authError.status === 422) {
-                    throw new Error(`El usuario "${cleanUsername}" ya existe. Por favor, elegí otro distinto (ej: ${cleanUsername}2).`);
+                    throw new Error(`El usuario "${cleanUsername}" ya existe en el sistema. Elegí otro nombre corto.`);
                 }
                 throw authError;
             }
 
-            if (!authData.user) throw new Error("No se pudo crear el usuario");
+            if (!authData.user) throw new Error("No se pudo crear el usuario internamente.");
 
-            // Le damos 1 segundo al Trigger de la BD para que termine de armar el perfil
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            // Trick: Le damos tiempo al Trigger automático de Postgres para que inserte el "Profile"
+            await new Promise(resolve => setTimeout(resolve, 1500));
 
-            // 2. Asignar el rol en organization_members directamente (Ya no intentamos editar el perfil)
+            // 4. Vincular el perfil creado a esta Organización con un Rol
             const { error: memberError } = await supabase
                 .from('organization_members')
                 .insert([{
@@ -83,7 +100,7 @@ export default function CreateStaffModal({ isOpen, onClose, onSuccess }: CreateS
 
         } catch (error: any) {
             console.error(error);
-            toast.error(error.message || 'Hubo un error al crear la cuenta');
+            toast.error(error.message || 'Hubo un error al crear la cuenta del empleado.');
         } finally {
             setLoading(false);
         }
@@ -91,18 +108,19 @@ export default function CreateStaffModal({ isOpen, onClose, onSuccess }: CreateS
 
     return (
         <Transition appear show={isOpen} as={Fragment}>
-            <Dialog as="div" className="relative z-[99999]" onClose={onClose}>
+            <Dialog as="div" className="relative z-[99999]" onClose={() => !loading && onClose()}>
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" />
 
                 <div className="fixed inset-0 overflow-y-auto">
                     <div className="flex min-h-full items-center justify-center p-4">
-                        <Dialog.Panel className="w-full max-w-md transform overflow-hidden rounded-3xl bg-white text-left align-middle shadow-2xl transition-all animate-in zoom-in-95">
+                        <Dialog.Panel className="w-full max-w-md transform overflow-hidden rounded-3xl bg-white text-left align-middle shadow-2xl transition-all animate-in zoom-in-95 duration-200">
+                            
                             <div className="flex justify-between items-center p-6 border-b border-slate-100 bg-slate-50 shrink-0">
                                 <Dialog.Title as="h3" className="text-xl font-black text-slate-800 flex items-center gap-2">
                                     <div className="p-2 bg-brand-100 rounded-xl"><UserCircle className="w-5 h-5 text-brand-600" /></div>
                                     Crear Cuenta de Personal
                                 </Dialog.Title>
-                                <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-xl transition-colors"><X className="w-5 h-5 text-slate-400" /></button>
+                                <button onClick={onClose} disabled={loading} className="p-2 hover:bg-slate-200 rounded-xl transition-colors disabled:opacity-50"><X className="w-5 h-5 text-slate-400" /></button>
                             </div>
 
                             <form onSubmit={handleSubmit} className="p-6 md:p-8 space-y-6">
@@ -114,23 +132,42 @@ export default function CreateStaffModal({ isOpen, onClose, onSuccess }: CreateS
 
                                 <div className="space-y-5">
                                     <div>
-                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Nombre Completo</label>
-                                        <input required type="text" className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-brand-500/20 focus:bg-white font-bold text-slate-800 transition-all" value={formData.full_name} onChange={e => setFormData({ ...formData, full_name: e.target.value })} placeholder="Ej: Marcos Mozo" />
+                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Nombre Completo *</label>
+                                        <input 
+                                            required autoFocus 
+                                            type="text" 
+                                            className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-brand-500/20 focus:bg-white font-bold text-slate-800 transition-all" 
+                                            value={formData.full_name} 
+                                            onChange={e => setFormData({ ...formData, full_name: e.target.value })} 
+                                            placeholder="Ej: Marcos Mozo" 
+                                        />
                                     </div>
                                     
                                     <div className="grid grid-cols-2 gap-4">
                                         <div>
-                                            <label className="flex items-center gap-1.5 text-xs font-bold text-slate-500 uppercase tracking-widest mb-2"><User className="w-4 h-4" /> Usuario</label>
-                                            <input required type="text" className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-brand-500/20 focus:bg-white font-bold text-slate-800 transition-all lowercase" value={formData.username} onChange={e => setFormData({ ...formData, username: e.target.value.toLowerCase().replace(/\s/g, '') })} placeholder="ej: marcos" />
+                                            <label className="flex items-center gap-1.5 text-xs font-bold text-slate-500 uppercase tracking-widest mb-2"><User className="w-4 h-4" /> Usuario *</label>
+                                            <input 
+                                                required type="text" 
+                                                className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-brand-500/20 focus:bg-white font-bold text-slate-800 transition-all lowercase" 
+                                                value={formData.username} 
+                                                onChange={e => setFormData({ ...formData, username: e.target.value.toLowerCase().replace(/[^a-z0-9]/g, '') })} 
+                                                placeholder="ej: marcos" 
+                                            />
                                         </div>
                                         <div>
-                                            <label className="flex items-center gap-1.5 text-xs font-bold text-slate-500 uppercase tracking-widest mb-2"><Key className="w-4 h-4" /> PIN Acceso</label>
-                                            <input required type="text" inputMode="numeric" maxLength={6} className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-brand-500/20 focus:bg-white font-black text-slate-800 transition-all tracking-widest" value={formData.pin} onChange={e => setFormData({ ...formData, pin: e.target.value.replace(/\D/g, '') })} placeholder="4 dígitos" />
+                                            <label className="flex items-center gap-1.5 text-xs font-bold text-slate-500 uppercase tracking-widest mb-2"><Key className="w-4 h-4" /> PIN Acceso *</label>
+                                            <input 
+                                                required type="password" inputMode="numeric" maxLength={6} 
+                                                className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-brand-500/20 focus:bg-white font-black text-slate-800 transition-all tracking-widest text-center" 
+                                                value={formData.pin} 
+                                                onChange={e => setFormData({ ...formData, pin: e.target.value.replace(/\D/g, '') })} 
+                                                placeholder="4 a 6 dígitos" 
+                                            />
                                         </div>
                                     </div>
 
                                     <div>
-                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Nivel de Acceso</label>
+                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Nivel de Acceso *</label>
                                         <div className="grid grid-cols-2 gap-3">
                                             <button type="button" onClick={() => setFormData({ ...formData, role: 'staff' })} className={`p-4 rounded-2xl border-2 font-bold text-sm transition-all text-left ${formData.role === 'staff' ? 'border-brand-500 bg-brand-50 text-brand-700 shadow-sm' : 'border-slate-100 text-slate-500 hover:border-slate-200 hover:bg-slate-50'}`}>
                                                 <span className="block text-base mb-1 text-slate-800">Personal</span>
@@ -151,6 +188,7 @@ export default function CreateStaffModal({ isOpen, onClose, onSuccess }: CreateS
                                     </button>
                                 </div>
                             </form>
+                            
                         </Dialog.Panel>
                     </div>
                 </div>

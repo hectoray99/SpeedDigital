@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
-import { createPortal } from 'react-dom';
+import { useState, useEffect, Fragment } from 'react';
+import { Dialog, Transition } from '@headlessui/react';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
-import { X, Search, Plus, Minus, MessageSquare, UtensilsCrossed, Send, Receipt, Banknote, CreditCard, SmartphoneNfc } from 'lucide-react';
+import { X, Search, Plus, Minus, MessageSquare, UtensilsCrossed, Send, Receipt, Banknote, CreditCard, SmartphoneNfc, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface TablePOSModalProps {
@@ -12,7 +12,7 @@ interface TablePOSModalProps {
 }
 
 interface CartItem {
-    cartItemId: string;
+    cartItemId: string; // ID temporal para manejar el carrito local
     product: any;
     quantity: number;
     note: string;
@@ -20,23 +20,30 @@ interface CartItem {
 
 export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalProps) {
     const { orgData } = useAuthStore();
+    
+    // Estados del Catálogo
     const [products, setProducts] = useState<any[]>([]);
     const [categories, setCategories] = useState<string[]>([]);
     const [activeCategory, setActiveCategory] = useState<string>('Todas');
     const [search, setSearch] = useState('');
     const [loading, setLoading] = useState(false);
 
+    // Estados del Pedido Activo
     const [cart, setCart] = useState<CartItem[]>([]);
     const [existingItems, setExistingItems] = useState<any[]>([]);
     const [isSaving, setIsSaving] = useState(false);
 
+    // Estados de Sub-Modales (Notas y Cobro)
     const [noteModalOpen, setNoteModalOpen] = useState(false);
     const [selectedCartItemId, setSelectedCartItemId] = useState<string | null>(null);
     const [currentNoteText, setCurrentNoteText] = useState('');
-
+    
     const [isCheckout, setIsCheckout] = useState(false);
     const [paymentMethod, setPaymentMethod] = useState('cash');
 
+    // =========================================================================
+    // INICIALIZACIÓN
+    // =========================================================================
     useEffect(() => {
         if (isOpen && orgData?.id) {
             fetchMenu();
@@ -79,6 +86,8 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
 
             if (error) throw error;
             setProducts(data || []);
+            
+            // Extraer categorías únicas para los tabs de filtrado
             const uniqueCategories = Array.from(new Set((data || []).map(p => p.properties?.category).filter(Boolean))) as string[];
             setCategories(['Todas', ...uniqueCategories]);
         } catch (error) {
@@ -88,8 +97,12 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
         }
     }
 
+    // =========================================================================
+    // MANEJO DEL CARRITO TEMPORAL
+    // =========================================================================
     const addToCart = (product: any) => {
         setCart(prev => {
+            // Buscamos si ya existe el producto Y NO tiene notas especiales agregadas
             const existingIndex = prev.findIndex(item => item.product.id === product.id && !item.note);
             if (existingIndex >= 0) {
                 const newCart = [...prev];
@@ -107,13 +120,16 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
                 return newQty > 0 ? { ...item, quantity: newQty } : item;
             }
             return item;
-        }).filter(item => item.quantity > 0));
+        }).filter(item => item.quantity > 0)); // Limpia los de cantidad 0
     };
 
     const removeItem = (cartItemId: string) => {
         setCart(prev => prev.filter(item => item.cartItemId !== cartItemId));
     };
 
+    // =========================================================================
+    // MANEJO DE NOTAS PARA COCINA
+    // =========================================================================
     const openNoteModal = (cartItemId: string) => {
         const item = cart.find(i => i.cartItemId === cartItemId);
         if (item) {
@@ -131,6 +147,8 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
             const item = newCart[itemIndex];
             const trimmedNote = currentNoteText.trim();
             
+            // Si el item tiene cantidad > 1 y le ponemos una nota, tenemos que separarlo
+            // Ej: 3 Hamburguesas -> 2 Normales + 1 (Sin Cebolla)
             if (item.quantity > 1 && trimmedNote !== item.note) {
                 newCart[itemIndex].quantity--;
                 newCart.push({ cartItemId: crypto.randomUUID(), product: item.product, quantity: 1, note: trimmedNote });
@@ -142,6 +160,9 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
         setNoteModalOpen(false);
     };
 
+    // =========================================================================
+    // COMANDAR (ENVIAR A COCINA / CREAR OPERACIÓN)
+    // =========================================================================
     const sendToKitchen = async () => {
         if (cart.length === 0) return toast.error("La comanda está vacía");
         setIsSaving(true);
@@ -149,12 +170,13 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
             const newCartTotal = cart.reduce((sum, item) => sum + (item.product.price * item.quantity), 0);
             let currentOperationId = table?.activeOrder?.id;
 
+            // 1. Si la mesa está vacía, creamos la Cabecera de la Operación (El Ticket)
             if (!currentOperationId) {
                 const { data: operation, error: opError } = await supabase
                     .from('operations')
                     .insert([{
                         organization_id: orgData.id,
-                        status: 'pending',
+                        status: 'pending', // Mesa Abierta
                         total_amount: newCartTotal,
                         metadata: { table_id: table.id, table_name: table.name }
                     }])
@@ -162,10 +184,12 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
                 if (opError) throw opError;
                 currentOperationId = operation.id;
             } else {
+                // Si la mesa ya estaba abierta, actualizamos el total agregando el nuevo importe
                 const updatedTotal = table.activeOrder.total_amount + newCartTotal;
                 await supabase.from('operations').update({ total_amount: updatedTotal }).eq('id', currentOperationId);
             }
 
+            // 2. Insertamos las Líneas (Los Platos) en la base de datos
             const lines = cart.map(item => ({
                 organization_id: orgData.id,
                 operation_id: currentOperationId,
@@ -187,17 +211,22 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
         }
     };
 
+    // =========================================================================
+    // COBRAR (CERRAR MESA)
+    // =========================================================================
     const handleCheckout = async () => {
         setIsSaving(true);
         try {
             const finalTotal = table.activeOrder.total_amount;
 
+            // 1. Cerramos la Operación
             const { error: opError } = await supabase
                 .from('operations')
-                .update({ status: 'paid' })
+                .update({ status: 'paid', balance: 0 })
                 .eq('id', table.activeOrder.id);
             if (opError) throw opError;
 
+            // 2. Generamos el Ingreso en Caja (Finanzas)
             const { error: financeError } = await supabase
                 .from('finance_ledger')
                 .insert([{
@@ -219,6 +248,7 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
         }
     };
 
+    // Filtrado de Menú
     const filteredProducts = products.filter(p => {
         const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase());
         const matchesCategory = activeCategory === 'Todas' || p.properties?.category === activeCategory;
@@ -229,186 +259,233 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
     const existingTotal = table?.activeOrder?.total_amount || 0;
     const finalTotal = existingTotal + newCartTotal;
 
-    if (!isOpen) return null;
+    // =========================================================================
+    // RENDER: LAYOUT DE 2 COLUMNAS (COMANDA / CATÁLOGO)
+    // =========================================================================
+    return (
+        <Transition appear show={isOpen} as={Fragment}>
+            <Dialog as="div" className="relative z-[99990]" onClose={() => !isSaving && onClose()}>
+                <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity" />
 
-    return createPortal(
-        <div className="fixed inset-0 z-[99999] flex items-end md:items-center justify-center bg-slate-900/60 backdrop-blur-sm p-0 md:p-4">
-            <div className="bg-white w-full md:max-w-6xl h-[90vh] md:h-[85vh] rounded-t-3xl md:rounded-3xl shadow-2xl overflow-hidden flex flex-col md:flex-row animate-in slide-in-from-bottom-8 md:zoom-in-95 duration-300 relative">
-                
-                {/* --- PANEL IZQUIERDO: COMANDA --- */}
-                <div className="w-full md:w-1/3 bg-slate-50 border-b md:border-r md:border-b-0 border-slate-200 flex flex-col h-1/2 md:h-full">
-                    <div className="p-4 bg-slate-900 text-white flex justify-between items-center shrink-0">
-                        <div>
-                            <h2 className="text-xl font-black">{table?.name}</h2>
-                            <p className="text-xs text-slate-400">
-                                {table?.activeOrder ? 'Mesa Ocupada' : `Capacidad: ${table?.capacity} personas`}
-                            </p>
-                        </div>
-                        <button onClick={onClose} className="p-2 bg-slate-800 hover:bg-red-500 hover:text-white rounded-xl transition-colors">
-                            <X className="w-5 h-5" />
-                        </button>
-                    </div>
-
-                    <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                        {existingItems.map((item, idx) => (
-                            <div key={idx} className="bg-white p-3 rounded-xl border border-slate-200 flex flex-col gap-1 opacity-70">
-                                <div className="flex justify-between items-start">
-                                    <div className="flex-1 pr-2">
-                                        <p className="font-bold text-slate-600 leading-tight">{item.catalog_items?.name || 'Ítem'}</p>
-                                        <p className="text-slate-500 font-bold text-sm">${(item.unit_price * item.quantity).toLocaleString()}</p>
+                <div className="fixed inset-0 overflow-hidden">
+                    <div className="flex min-h-[100dvh] md:min-h-full items-end md:items-center justify-center p-0 md:p-4">
+                        <Dialog.Panel className="w-full md:max-w-6xl h-[95vh] md:h-[85vh] bg-white rounded-t-3xl md:rounded-3xl shadow-2xl overflow-hidden flex flex-col md:flex-row transform transition-all animate-in slide-in-from-bottom-full md:slide-in-from-bottom-0 md:zoom-in-95">
+                            
+                            {/* --- PANEL IZQUIERDO: COMANDA Y TICKET --- */}
+                            <div className="w-full md:w-1/3 bg-slate-50 border-b md:border-r md:border-b-0 border-slate-200 flex flex-col h-1/2 md:h-full z-20">
+                                
+                                {/* Header Mesa */}
+                                <div className="p-4 bg-slate-900 text-white flex justify-between items-center shrink-0 shadow-sm">
+                                    <div>
+                                        <Dialog.Title as="h2" className="text-xl font-black">{table?.name}</Dialog.Title>
+                                        <p className="text-xs text-slate-400 font-medium tracking-wide">
+                                            {table?.activeOrder ? 'Mesa Ocupada' : `Capacidad: ${table?.capacity} personas`}
+                                        </p>
                                     </div>
-                                    <span className="font-black text-slate-400 bg-slate-100 px-2 py-1 rounded text-xs">{item.quantity}x</span>
+                                    <button onClick={onClose} disabled={isSaving} className="p-2 bg-slate-800 hover:bg-red-500 hover:text-white rounded-xl transition-colors disabled:opacity-50">
+                                        <X className="w-5 h-5" />
+                                    </button>
                                 </div>
-                                {item.notes && <p className="text-xs font-bold text-slate-500 italic mt-1">* {item.notes}</p>}
-                            </div>
-                        ))}
 
-                        {existingItems.length > 0 && cart.length > 0 && (
-                            <div className="flex items-center gap-2 py-2">
-                                <div className="h-px bg-slate-200 flex-1"></div>
-                                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Nuevos Platos</span>
-                                <div className="h-px bg-slate-200 flex-1"></div>
-                            </div>
-                        )}
-
-                        {cart.length === 0 && existingItems.length === 0 ? (
-                            <div className="h-full flex flex-col items-center justify-center text-slate-400">
-                                <UtensilsCrossed className="w-12 h-12 mb-2 opacity-50" />
-                                <p>La mesa está vacía</p>
-                            </div>
-                        ) : (
-                            cart.map((item) => (
-                                <div key={item.cartItemId} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-2 border-l-4 border-l-brand-400">
-                                    <div className="flex justify-between items-start">
-                                        <div className="flex-1 pr-2">
-                                            <p className="font-bold text-slate-800 leading-tight">{item.product.name}</p>
-                                            <p className="text-brand-600 font-black text-sm">${(item.product.price * item.quantity).toLocaleString()}</p>
-                                            {item.note && (
-                                                <p className="text-xs font-bold text-orange-600 bg-orange-50 p-1.5 rounded border border-orange-100 mt-1 inline-block">
-                                                    Nota: {item.note}
-                                                </p>
-                                            )}
+                                {/* Listado de Platos (Viejos y Nuevos) */}
+                                <div className="flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar pb-32 md:pb-4">
+                                    
+                                    {/* Platos que ya están en la mesa */}
+                                    {existingItems.map((item, idx) => (
+                                        <div key={`exist_${idx}`} className="bg-white p-3 rounded-xl border border-slate-200 flex flex-col gap-1 opacity-70">
+                                            <div className="flex justify-between items-start">
+                                                <div className="flex-1 pr-2">
+                                                    <p className="font-bold text-slate-600 leading-tight">{item.catalog_items?.name || 'Ítem'}</p>
+                                                    <p className="text-slate-500 font-bold text-sm">${(item.unit_price * item.quantity).toLocaleString()}</p>
+                                                </div>
+                                                <span className="font-black text-slate-400 bg-slate-100 px-2 py-1 rounded text-xs">{item.quantity}x</span>
+                                            </div>
+                                            {item.notes && <p className="text-xs font-bold text-slate-500 italic mt-1">* {item.notes}</p>}
                                         </div>
-                                        <button onClick={() => openNoteModal(item.cartItemId)} className={`p-1.5 rounded-lg transition-colors ${item.note ? 'text-orange-500 bg-orange-50' : 'text-slate-400 bg-slate-100'}`}>
-                                            <MessageSquare className="w-4 h-4" />
-                                        </button>
-                                    </div>
-                                    <div className="flex items-center justify-between pt-2 border-t border-slate-50 mt-1">
-                                        <div className="flex items-center bg-slate-100 rounded-lg p-0.5">
-                                            <button onClick={() => item.quantity > 1 ? updateQuantity(item.cartItemId, -1) : removeItem(item.cartItemId)} className="p-1.5 hover:bg-white rounded-md text-slate-600"><Minus className="w-4 h-4" /></button>
-                                            <span className="w-8 text-center font-bold text-sm text-slate-800">{item.quantity}</span>
-                                            <button onClick={() => updateQuantity(item.cartItemId, 1)} className="p-1.5 hover:bg-white rounded-md text-slate-600"><Plus className="w-4 h-4" /></button>
-                                        </div>
-                                        <button onClick={() => removeItem(item.cartItemId)} className="text-xs font-bold text-red-500">Quitar</button>
-                                    </div>
-                                </div>
-                            ))
-                        )}
-                    </div>
-
-                    <div className="p-4 bg-white border-t border-slate-200 shadow-[0_-10px_15px_-3px_rgba(0,0,0,0.05)] shrink-0">
-                        <div className="flex justify-between items-center mb-4">
-                            <span className="text-slate-500 font-bold">Total Mesa</span>
-                            <span className="text-2xl font-black text-slate-800">${finalTotal.toLocaleString()}</span>
-                        </div>
-                        
-                        {cart.length > 0 ? (
-                            <button onClick={sendToKitchen} disabled={isSaving} className="w-full bg-brand-600 hover:bg-brand-500 text-white font-black py-4 rounded-xl flex items-center justify-center gap-2 shadow-lg transition-all active:scale-95">
-                                {isSaving ? "Enviando..." : <><Send className="w-5 h-5" /> Enviar a Cocina</>}
-                            </button>
-                        ) : table?.activeOrder ? (
-                            <button onClick={() => setIsCheckout(true)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-black py-4 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/30 transition-all active:scale-95">
-                                <Receipt className="w-5 h-5" /> Cobrar Mesa
-                            </button>
-                        ) : null}
-                    </div>
-                </div>
-
-                {/* --- PANEL DERECHO: MENÚ o CHECKOUT --- */}
-                <div className="w-full md:w-2/3 bg-slate-100 flex flex-col h-1/2 md:h-full overflow-hidden relative">
-                    {!isCheckout ? (
-                        <>
-                            <div className="bg-white p-4 shadow-sm z-10 shrink-0">
-                                <div className="relative mb-3">
-                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
-                                    <input type="text" placeholder="Buscar plato..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-slate-100 rounded-xl focus:ring-2 focus:ring-brand-500/20 font-medium outline-none"/>
-                                </div>
-                                <div className="flex overflow-x-auto gap-2 pb-2 hide-scrollbar">
-                                    {categories.map(cat => (
-                                        <button key={cat} onClick={() => setActiveCategory(cat)} className={`whitespace-nowrap px-4 py-2 rounded-xl font-bold text-sm transition-all ${activeCategory === cat ? 'bg-slate-800 text-white shadow-md' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'}`}>{cat}</button>
                                     ))}
-                                </div>
-                            </div>
-                            <div className="flex-1 overflow-y-auto p-4">
-                                {loading ? <div className="flex justify-center text-slate-400 p-8">Cargando menú...</div> : (
-                                    <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-                                        {filteredProducts.map(product => (
-                                            <div key={product.id} onClick={() => addToCart(product)} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 hover:border-brand-400 hover:shadow-md cursor-pointer transition-all active:scale-95 flex flex-col justify-between min-h-[120px]">
-                                                <h3 className="font-bold text-slate-700 leading-tight line-clamp-2">{product.name}</h3>
-                                                <div className="flex justify-between items-end mt-2">
-                                                    <span className="font-black text-brand-600">${product.price.toLocaleString()}</span>
-                                                    <div className="w-8 h-8 rounded-full bg-brand-50 flex items-center justify-center text-brand-600"><Plus className="w-4 h-4" /></div>
+
+                                    {/* Divisor si hay platos viejos y nuevos mezclados */}
+                                    {existingItems.length > 0 && cart.length > 0 && (
+                                        <div className="flex items-center gap-2 py-2">
+                                            <div className="h-px bg-slate-200 flex-1"></div>
+                                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Nuevos Platos</span>
+                                            <div className="h-px bg-slate-200 flex-1"></div>
+                                        </div>
+                                    )}
+
+                                    {/* Carrito Vacío */}
+                                    {cart.length === 0 && existingItems.length === 0 ? (
+                                        <div className="h-full flex flex-col items-center justify-center text-slate-400">
+                                            <UtensilsCrossed className="w-12 h-12 mb-2 opacity-50" />
+                                            <p className="font-bold">La mesa está vacía</p>
+                                        </div>
+                                    ) : (
+                                        /* Platos por enviar a cocina */
+                                        cart.map((item) => (
+                                            <div key={item.cartItemId} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-2 border-l-4 border-l-brand-400">
+                                                <div className="flex justify-between items-start">
+                                                    <div className="flex-1 pr-2">
+                                                        <p className="font-bold text-slate-800 leading-tight">{item.product.name}</p>
+                                                        <p className="text-brand-600 font-black text-sm">${(item.product.price * item.quantity).toLocaleString()}</p>
+                                                        {item.note && (
+                                                            <p className="text-xs font-bold text-orange-600 bg-orange-50 p-1.5 rounded border border-orange-100 mt-1 inline-block">
+                                                                Nota: {item.note}
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                    <button onClick={() => openNoteModal(item.cartItemId)} disabled={isSaving} className={`p-1.5 rounded-lg transition-colors disabled:opacity-50 ${item.note ? 'text-orange-500 bg-orange-50' : 'text-slate-400 bg-slate-100 hover:bg-slate-200'}`}>
+                                                        <MessageSquare className="w-4 h-4" />
+                                                    </button>
+                                                </div>
+                                                <div className="flex items-center justify-between pt-2 border-t border-slate-50 mt-1">
+                                                    <div className="flex items-center bg-slate-100 rounded-lg p-0.5">
+                                                        <button onClick={() => item.quantity > 1 ? updateQuantity(item.cartItemId, -1) : removeItem(item.cartItemId)} disabled={isSaving} className="p-1.5 hover:bg-white rounded-md text-slate-600 disabled:opacity-50"><Minus className="w-4 h-4" /></button>
+                                                        <span className="w-8 text-center font-bold text-sm text-slate-800">{item.quantity}</span>
+                                                        <button onClick={() => updateQuantity(item.cartItemId, 1)} disabled={isSaving} className="p-1.5 hover:bg-white rounded-md text-slate-600 disabled:opacity-50"><Plus className="w-4 h-4" /></button>
+                                                    </div>
+                                                    <button onClick={() => removeItem(item.cartItemId)} disabled={isSaving} className="text-xs font-bold text-red-500 hover:text-red-700 disabled:opacity-50">Quitar</button>
                                                 </div>
                                             </div>
-                                        ))}
+                                        ))
+                                    )}
+                                </div>
+
+                                {/* Footer Fijo: Total y Botones de Acción */}
+                                <div className="absolute md:relative bottom-0 left-0 w-full p-4 md:p-5 bg-white border-t border-slate-200 shadow-[0_-10px_15px_-3px_rgba(0,0,0,0.05)] shrink-0 z-30">
+                                    <div className="flex justify-between items-center mb-4">
+                                        <span className="text-slate-500 font-bold uppercase tracking-widest text-xs">Total Mesa</span>
+                                        <span className="text-3xl font-black text-slate-800 tracking-tight">${finalTotal.toLocaleString()}</span>
                                     </div>
-                                )}
-                            </div>
-                        </>
-                    ) : (
-                        <div className="flex-1 flex flex-col p-6 md:p-8 bg-slate-50 animate-in fade-in slide-in-from-right-8 duration-300">
-                            <div className="flex items-center gap-4 mb-8">
-                                <button onClick={() => setIsCheckout(false)} className="p-2 bg-white rounded-xl shadow-sm text-slate-500 hover:text-slate-800 border border-slate-200 transition-colors">
-                                    <X className="w-5 h-5" />
-                                </button>
-                                <h2 className="text-2xl font-black text-slate-800">Finalizar Pago</h2>
-                            </div>
-
-                            <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm text-center mb-8">
-                                <p className="text-slate-500 font-bold mb-2 uppercase tracking-widest text-sm">Total a Cobrar</p>
-                                <p className="text-5xl md:text-6xl font-black text-slate-800">${finalTotal.toLocaleString()}</p>
-                            </div>
-
-                            <h3 className="font-bold text-slate-700 mb-4">Método de Pago</h3>
-                            <div className="grid grid-cols-3 gap-3 md:gap-4 mb-auto">
-                                <button onClick={() => setPaymentMethod('cash')} className={`p-4 md:p-6 rounded-2xl border-2 flex flex-col items-center justify-center gap-2 md:gap-3 transition-all ${paymentMethod === 'cash' ? 'border-emerald-500 bg-emerald-50 text-emerald-700 shadow-md' : 'border-slate-200 bg-white text-slate-500 hover:border-emerald-200'}`}>
-                                    <Banknote className="w-6 h-6 md:w-8 md:h-8" />
-                                    <span className="font-bold text-xs md:text-base">Efectivo</span>
-                                </button>
-                                <button onClick={() => setPaymentMethod('card')} className={`p-4 md:p-6 rounded-2xl border-2 flex flex-col items-center justify-center gap-2 md:gap-3 transition-all ${paymentMethod === 'card' ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-md' : 'border-slate-200 bg-white text-slate-500 hover:border-blue-200'}`}>
-                                    <CreditCard className="w-6 h-6 md:w-8 md:h-8" />
-                                    <span className="font-bold text-xs md:text-base">Tarjeta</span>
-                                </button>
-                                <button onClick={() => setPaymentMethod('mercadopago')} className={`p-4 md:p-6 rounded-2xl border-2 flex flex-col items-center justify-center gap-2 md:gap-3 transition-all ${paymentMethod === 'mercadopago' ? 'border-sky-500 bg-sky-50 text-sky-700 shadow-md' : 'border-slate-200 bg-white text-slate-500 hover:border-sky-200'}`}>
-                                    <SmartphoneNfc className="w-6 h-6 md:w-8 md:h-8" />
-                                    <span className="font-bold text-xs md:text-base text-center">Transferencia</span>
-                                </button>
-                            </div>
-
-                            <button onClick={handleCheckout} disabled={isSaving} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-black py-5 rounded-2xl mt-8 shadow-xl shadow-emerald-500/30 transition-all text-lg flex items-center justify-center gap-2 active:scale-95">
-                                {isSaving ? "Procesando..." : <><Receipt className="w-6 h-6" /> Confirmar Pago</>}
-                            </button>
-                        </div>
-                    )}
-                </div>
-
-                {/* MODAL DE NOTAS */}
-                {noteModalOpen && (
-                    <div className="absolute inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in">
-                        <div className="bg-white w-full max-w-sm rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95">
-                            <div className="p-6 space-y-4">
-                                <h3 className="text-lg font-black text-slate-800">Nota para cocina</h3>
-                                <textarea autoFocus value={currentNoteText} onChange={(e) => setCurrentNoteText(e.target.value)} placeholder="Ej: Sin cebolla, extra mayo..." className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-brand-500/20 resize-none h-32 font-medium text-slate-700" />
-                                <div className="flex gap-3">
-                                    <button onClick={() => setNoteModalOpen(false)} className="flex-1 py-3 rounded-xl font-bold text-slate-600 bg-slate-100 hover:bg-slate-200">Cancelar</button>
-                                    <button onClick={saveNote} className="flex-1 py-3 rounded-xl font-bold text-white bg-brand-600 hover:bg-brand-500 shadow-lg shadow-brand-500/20">Guardar</button>
+                                    
+                                    {cart.length > 0 ? (
+                                        <button onClick={sendToKitchen} disabled={isSaving} className="w-full bg-brand-600 hover:bg-brand-500 text-white font-black py-4 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-brand-500/20 transition-all active:scale-95 disabled:opacity-50 text-lg">
+                                            {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />} Enviar a Cocina
+                                        </button>
+                                    ) : table?.activeOrder ? (
+                                        <button onClick={() => setIsCheckout(true)} disabled={isSaving} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-black py-4 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/30 transition-all active:scale-95 disabled:opacity-50 text-lg">
+                                            <Receipt className="w-5 h-5" /> Cobrar Mesa
+                                        </button>
+                                    ) : null}
                                 </div>
                             </div>
-                        </div>
+
+                            {/* --- PANEL DERECHO: CATÁLOGO o CHECKOUT --- */}
+                            <div className="w-full md:w-2/3 bg-slate-100 flex flex-col h-1/2 md:h-full overflow-hidden relative z-10">
+                                {!isCheckout ? (
+                                    <>
+                                        {/* Buscador y Filtros */}
+                                        <div className="bg-white p-4 shadow-sm z-10 shrink-0">
+                                            <div className="relative mb-3">
+                                                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
+                                                <input type="text" placeholder="Buscar plato o bebida..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500/20 focus:bg-white font-medium outline-none transition-all text-slate-800"/>
+                                            </div>
+                                            <div className="flex overflow-x-auto gap-2 pb-2 hide-scrollbar">
+                                                {categories.map(cat => (
+                                                    <button key={cat} onClick={() => setActiveCategory(cat)} className={`whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-sm transition-all focus:outline-none focus:ring-2 focus:ring-slate-400/20 ${activeCategory === cat ? 'bg-slate-900 text-white shadow-md' : 'bg-slate-50 text-slate-500 hover:bg-slate-100 border border-slate-200'}`}>
+                                                        {cat}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        
+                                        {/* Grilla de Platos */}
+                                        <div className="flex-1 overflow-y-auto p-4 hide-scrollbar">
+                                            {loading ? (
+                                                <div className="h-full flex flex-col justify-center items-center text-slate-400 opacity-60 gap-2">
+                                                    <Loader2 className="w-8 h-8 animate-spin" /> Cargando menú...
+                                                </div>
+                                            ) : (
+                                                <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
+                                                    {filteredProducts.map(product => (
+                                                        <button 
+                                                            key={product.id} 
+                                                            onClick={() => addToCart(product)} 
+                                                            disabled={isSaving}
+                                                            className="bg-white p-4 md:p-5 rounded-2xl shadow-sm border border-slate-200 hover:border-brand-400 hover:shadow-md cursor-pointer transition-all active:scale-95 flex flex-col justify-between min-h-[130px] text-left focus:outline-none focus:ring-2 focus:ring-brand-500/20 disabled:opacity-50"
+                                                        >
+                                                            <h3 className="font-bold text-slate-700 leading-tight line-clamp-2 text-sm md:text-base">{product.name}</h3>
+                                                            <div className="flex justify-between items-end mt-4 w-full">
+                                                                <span className="font-black text-brand-600 text-lg">${product.price.toLocaleString()}</span>
+                                                                <div className="w-8 h-8 rounded-full bg-brand-50 border border-brand-100 flex items-center justify-center text-brand-600">
+                                                                    <Plus className="w-4 h-4" />
+                                                                </div>
+                                                            </div>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </>
+                                ) : (
+                                    /* Pantalla de Checkout (Cobro final) */
+                                    <div className="flex-1 flex flex-col p-6 md:p-10 bg-slate-50 animate-in fade-in slide-in-from-right-8 duration-300 overflow-y-auto">
+                                        <div className="flex items-center gap-4 mb-8">
+                                            <button onClick={() => setIsCheckout(false)} className="p-2.5 bg-white rounded-xl shadow-sm text-slate-500 hover:text-slate-800 hover:bg-slate-100 border border-slate-200 transition-colors">
+                                                <X className="w-5 h-5" />
+                                            </button>
+                                            <h2 className="text-2xl md:text-3xl font-black text-slate-800">Finalizar Pago</h2>
+                                        </div>
+
+                                        <div className="bg-white p-8 md:p-10 rounded-3xl border border-slate-200 shadow-sm text-center mb-8 flex flex-col items-center">
+                                            <p className="text-slate-500 font-bold mb-2 uppercase tracking-widest text-sm">Total a Cobrar</p>
+                                            <p className="text-6xl md:text-7xl font-black text-slate-800 tracking-tight">${finalTotal.toLocaleString()}</p>
+                                        </div>
+
+                                        <h3 className="font-bold text-slate-700 mb-4 ml-1">Seleccionar Método de Pago</h3>
+                                        <div className="grid grid-cols-3 gap-3 md:gap-4 mb-auto">
+                                            <button onClick={() => setPaymentMethod('cash')} className={`p-4 md:p-6 rounded-2xl border-2 flex flex-col items-center justify-center gap-2 md:gap-3 transition-all focus:outline-none focus:ring-4 focus:ring-emerald-500/20 ${paymentMethod === 'cash' ? 'border-emerald-500 bg-emerald-50 text-emerald-700 shadow-md scale-105' : 'border-slate-200 bg-white text-slate-500 hover:border-emerald-200'}`}>
+                                                <Banknote className="w-6 h-6 md:w-8 md:h-8" />
+                                                <span className="font-bold text-xs md:text-sm uppercase tracking-wide">Efectivo</span>
+                                            </button>
+                                            <button onClick={() => setPaymentMethod('card')} className={`p-4 md:p-6 rounded-2xl border-2 flex flex-col items-center justify-center gap-2 md:gap-3 transition-all focus:outline-none focus:ring-4 focus:ring-blue-500/20 ${paymentMethod === 'card' ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-md scale-105' : 'border-slate-200 bg-white text-slate-500 hover:border-blue-200'}`}>
+                                                <CreditCard className="w-6 h-6 md:w-8 md:h-8" />
+                                                <span className="font-bold text-xs md:text-sm uppercase tracking-wide">Tarjeta</span>
+                                            </button>
+                                            <button onClick={() => setPaymentMethod('mercadopago')} className={`p-4 md:p-6 rounded-2xl border-2 flex flex-col items-center justify-center gap-2 md:gap-3 transition-all focus:outline-none focus:ring-4 focus:ring-sky-500/20 ${paymentMethod === 'mercadopago' ? 'border-sky-500 bg-sky-50 text-sky-700 shadow-md scale-105' : 'border-slate-200 bg-white text-slate-500 hover:border-sky-200'}`}>
+                                                <SmartphoneNfc className="w-6 h-6 md:w-8 md:h-8" />
+                                                <span className="font-bold text-xs md:text-sm uppercase tracking-wide text-center">Transf.</span>
+                                            </button>
+                                        </div>
+
+                                        <button onClick={handleCheckout} disabled={isSaving} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-black py-5 rounded-2xl mt-8 shadow-xl shadow-emerald-500/30 transition-all text-xl flex items-center justify-center gap-3 active:scale-95 disabled:opacity-50">
+                                            {isSaving ? <Loader2 className="w-6 h-6 animate-spin" /> : <Receipt className="w-6 h-6" />} Confirmar Cobro
+                                        </button>
+                                    </div>
+                                )}
+
+                                {/* --- SUB-MODAL DE NOTAS PARA COCINA --- */}
+                                <Transition appear show={noteModalOpen} as={Fragment}>
+                                    <Dialog as="div" className="relative z-[99999]" onClose={() => setNoteModalOpen(false)}>
+                                        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" />
+                                        <div className="fixed inset-0 flex items-center justify-center p-4">
+                                            <Dialog.Panel className="bg-white w-full max-w-sm rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+                                                <div className="p-6 md:p-8 space-y-4">
+                                                    <Dialog.Title as="h3" className="text-xl font-black text-slate-800 flex items-center gap-2">
+                                                        <MessageSquare className="w-5 h-5 text-orange-500" /> Nota para cocina
+                                                    </Dialog.Title>
+                                                    <textarea 
+                                                        autoFocus 
+                                                        value={currentNoteText} 
+                                                        onChange={(e) => setCurrentNoteText(e.target.value)} 
+                                                        placeholder="Ej: Sin cebolla, extra mayo, la carne a punto..." 
+                                                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-brand-500/20 resize-none h-32 font-medium text-slate-700 transition-all" 
+                                                    />
+                                                    <div className="flex gap-3 pt-2">
+                                                        <button onClick={() => setNoteModalOpen(false)} className="flex-1 py-3.5 rounded-xl font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors">Cancelar</button>
+                                                        <button onClick={saveNote} className="flex-1 py-3.5 rounded-xl font-bold text-white bg-brand-600 hover:bg-brand-500 shadow-lg shadow-brand-500/20 active:scale-95 transition-all">Guardar Nota</button>
+                                                    </div>
+                                                </div>
+                                            </Dialog.Panel>
+                                        </div>
+                                    </Dialog>
+                                </Transition>
+
+                            </div>
+
+                        </Dialog.Panel>
                     </div>
-                )}
-            </div>
-        </div>,
-        document.body
+                </div>
+            </Dialog>
+        </Transition>
     );
 }

@@ -52,7 +52,7 @@ export default function Dashboard() {
         try {
             setLoading(true);
 
-            // --- A. Verificar estado de la caja ---
+            // --- A. Verificar estado de la caja (Abierta o Cerrada) ---
             const { data: sessionData } = await supabase
                 .from('cash_sessions')
                 .select('id')
@@ -77,12 +77,13 @@ export default function Dashboard() {
                 .gte('processed_at', today.toISOString())
                 .lt('processed_at', tomorrow.toISOString());
 
-            const revenue = (incomeToday || []).reduce((sum, item) => sum + Number(item.amount), 0);
-            const uniqueOpIds = [...new Set((incomeToday || []).map(i => i.operation_id).filter(Boolean))];
+            const validIncome = incomeToday || [];
+            const revenue = validIncome.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+            const uniqueOpIds = [...new Set(validIncome.map(i => i.operation_id).filter(Boolean))];
             const totalOrders = uniqueOpIds.length;
             const avgTicket = totalOrders > 0 ? revenue / totalOrders : 0;
 
-            // --- D. Turnos de Hoy ---
+            // --- D. Tareas Activas (Turnos) ---
             const { data: appointmentsToday } = await supabase
                 .from('appointments')
                 .select('id, status')
@@ -90,7 +91,7 @@ export default function Dashboard() {
                 .gte('start_time', today.toISOString())
                 .lt('start_time', tomorrow.toISOString());
 
-            // --- E. Operaciones de la semana ---
+            // --- E. Operaciones de la semana (Para el Gráfico) ---
             const sevenDaysAgo = new Date();
             sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
             sevenDaysAgo.setHours(0, 0, 0, 0);
@@ -109,7 +110,7 @@ export default function Dashboard() {
                 totalOrdersToday: totalOrders
             });
 
-            // --- F. Procesar Ranking ---
+            // --- F. Procesar Ranking (Top 5 Productos) ---
             if (uniqueOpIds.length > 0) {
                 const { data: lines } = await supabase
                     .from('operation_lines')
@@ -122,7 +123,7 @@ export default function Dashboard() {
                         const catalogData = line.catalog_items as any;
                         const name = Array.isArray(catalogData) ? catalogData[0]?.name : catalogData?.name;
                         if (name) {
-                            productCounts[name] = (productCounts[name] || 0) + Number(line.quantity);
+                            productCounts[name] = (productCounts[name] || 0) + Number(line.quantity || 0);
                         }
                     });
 
@@ -137,12 +138,13 @@ export default function Dashboard() {
                 setTopProducts([]);
             }
 
-            // --- G. Procesar Gráfico ---
+            // --- G. Procesar Gráfico (Últimos 7 días) ---
             if (incomeWeek) {
                 const dailyData: Record<string, number> = {};
+                const baseDate = new Date(); // Optimización: Una sola fecha base
 
                 for (let i = 6; i >= 0; i--) {
-                    const d = new Date();
+                    const d = new Date(baseDate);
                     d.setDate(d.getDate() - i);
                     const dateStr = d.toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric' });
                     dailyData[dateStr] = 0;
@@ -151,7 +153,7 @@ export default function Dashboard() {
                 incomeWeek.forEach(inc => {
                     const dateStr = new Date(inc.processed_at || new Date()).toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric' });
                     if (dailyData[dateStr] !== undefined) {
-                        dailyData[dateStr] += Number(inc.amount);
+                        dailyData[dateStr] += Number(inc.amount || 0);
                     }
                 });
 
@@ -173,9 +175,9 @@ export default function Dashboard() {
 
     if (loading) {
         return (
-            <div className="min-h-[70vh] flex flex-col items-center justify-center text-slate-400 gap-4">
+            <div className="min-h-[70vh] flex flex-col items-center justify-center text-slate-400 gap-4 animate-in fade-in duration-500">
                 <Loader2 className="w-10 h-10 animate-spin text-brand-500" />
-                <p className="font-bold tracking-wide">Analizando datos del local...</p>
+                <p className="font-bold tracking-wide uppercase text-sm">Analizando datos del local...</p>
             </div>
         );
     }
@@ -187,7 +189,7 @@ export default function Dashboard() {
             </div>
             <div>
                 <p className="text-slate-500 font-bold text-xs uppercase tracking-widest mb-1.5">{title}</p>
-                <h3 className="text-3xl md:text-4xl font-black text-slate-800 tracking-tight">{value}</h3>
+                <h3 className="text-3xl md:text-4xl font-black text-slate-800 tracking-tight truncate">{value}</h3>
                 <p className="text-slate-400 text-sm mt-2 font-medium">{subtitle}</p>
             </div>
         </div>
@@ -197,6 +199,7 @@ export default function Dashboard() {
         <div className="max-w-7xl mx-auto animate-in fade-in duration-500">
             <AnnouncementBanner />
             
+            {/* --- CABECERA --- */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 md:mb-10 gap-4">
                 <div>
                     <h1 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tight mb-2">Panel de Control</h1>
@@ -209,6 +212,7 @@ export default function Dashboard() {
                 </div>
             </div>
 
+            {/* --- TARJETAS DE MÉTRICAS --- */}
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 md:gap-6 mb-8 md:mb-10">
                 <MetricCard
                     title="Ingresos de Hoy"
@@ -275,19 +279,19 @@ export default function Dashboard() {
                         ) : (
                             <div className="h-full flex flex-col items-center justify-center text-slate-400 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
                                 <TrendingUp className="w-12 h-12 mb-3 text-slate-300" />
-                                <p className="font-bold">Aún no hay ingresos esta semana.</p>
-                                <p className="text-sm mt-1">Cuando cobres, el gráfico aparecerá aquí.</p>
+                                <p className="font-bold text-center">Aún no hay ingresos esta semana.</p>
+                                <p className="text-sm mt-1 text-center">Cuando cobres, el gráfico aparecerá aquí.</p>
                             </div>
                         )}
                     </div>
                 </div>
 
-                {/* --- RANKING --- */}
+                {/* --- RANKING (Top 5 Productos) --- */}
                 <div className="bg-slate-900 p-8 rounded-[2rem] shadow-xl flex flex-col text-white relative overflow-hidden border border-slate-800 min-h-[400px]">
                     <div className="absolute top-0 right-0 w-48 h-48 bg-brand-500 rounded-full mix-blend-screen filter blur-[80px] opacity-30 pointer-events-none"></div>
                     
                     <div className="flex items-center gap-4 mb-8 relative z-10">
-                        <div className="p-3 bg-brand-500/20 text-brand-400 rounded-xl">
+                        <div className="p-3 bg-brand-500/20 text-brand-400 rounded-xl shrink-0">
                             <Award className="w-6 h-6" />
                         </div>
                         <div>
@@ -308,9 +312,9 @@ export default function Dashboard() {
                                     <div key={index} className="flex items-center gap-4 bg-slate-800/50 p-4 rounded-2xl border border-slate-700/50 hover:bg-slate-800 transition-colors">
                                         <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm shrink-0 shadow-inner
                                             ${index === 0 ? 'bg-amber-400 text-amber-900 shadow-amber-500/20' :
-                                                index === 1 ? 'bg-slate-300 text-slate-800 shadow-slate-400/20' :
-                                                    index === 2 ? 'bg-orange-400 text-orange-950 shadow-orange-500/20' :
-                                                        'bg-slate-800 text-slate-400 border border-slate-700'}`}>
+                                              index === 1 ? 'bg-slate-300 text-slate-800 shadow-slate-400/20' :
+                                              index === 2 ? 'bg-orange-400 text-orange-950 shadow-orange-500/20' :
+                                              'bg-slate-800 text-slate-400 border border-slate-700'}`}>
                                             {index + 1}
                                         </div>
                                         <div className="flex-1 overflow-hidden">

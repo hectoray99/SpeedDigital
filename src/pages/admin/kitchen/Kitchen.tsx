@@ -13,9 +13,11 @@ export default function Kitchen() {
     const [refreshing, setRefreshing] = useState(false);
     const [orderToPrint, setOrderToPrint] = useState<any>(null);
     
-    // --- NUEVO: Estado para pestañas móviles ---
+    // Estado para las pestañas de navegación (Exclusivo vista Móvil)
     const [activeMobileTab, setActiveMobileTab] = useState<'pending' | 'preparing' | 'ready'>('pending');
 
+    // Estado persistente: El usuario puede poner la cocina en modo "Interactivo" (Los cocineros tocan la pantalla)
+    // o "Solo Lectura" (El mozo mira qué está listo desde su teléfono).
     const [isInteractiveMode, setIsInteractiveMode] = useState(() => {
         return localStorage.getItem('kitchen_interactive_mode') === 'true';
     });
@@ -29,10 +31,11 @@ export default function Kitchen() {
         toast.success(newMode ? 'Modo Cocina Activado' : 'Modo Solo Lectura (Mozo)');
     };
 
+    // Auto-Refresco: La cocina actualiza sola los pedidos cada 30 segundos
     useEffect(() => {
         if (orgData?.id) {
             fetchKitchenOrders();
-            const interval = setInterval(fetchKitchenOrders, 30000); // Refresco cada 30s
+            const interval = setInterval(fetchKitchenOrders, 30000); 
             return () => clearInterval(interval);
         }
     }, [orgData?.id]);
@@ -45,12 +48,14 @@ export default function Kitchen() {
     async function fetchKitchenOrders() {
         try {
             setRefreshing(true);
+            
+            // 1. Buscamos Comandas Abiertas (Operaciones pendientes)
             const { data: opsData, error: opsError } = await supabase
                 .from('operations')
                 .select('id, metadata, created_at, number')
                 .eq('organization_id', orgData.id)
                 .eq('status', 'pending')
-                .order('created_at', { ascending: true });
+                .order('created_at', { ascending: true }); // Las más viejas primero (Prioridad)
 
             if (opsError) throw opsError;
 
@@ -59,6 +64,7 @@ export default function Kitchen() {
                 return;
             }
 
+            // 2. Buscamos el detalle (Las Líneas / Platos) de esas comandas
             const opIds = opsData.map(op => op.id);
             const { data: linesData, error: linesError } = await supabase
                 .from('operation_lines')
@@ -67,6 +73,7 @@ export default function Kitchen() {
 
             if (linesError) throw linesError;
 
+            // 3. Ensamblamos la orden completa para renderizarla fácil
             const fullOrders = opsData.map(op => {
                 const lines = linesData?.filter(line => line.operation_id === op.id) || [];
                 return {
@@ -79,6 +86,7 @@ export default function Kitchen() {
                 };
             });
 
+            // Solo mostramos comandas que tengan platos adentro
             setOrders(fullOrders.filter(o => o.items.length > 0));
         } catch (error) {
             console.error('Error fetching kitchen orders:', error);
@@ -94,27 +102,36 @@ export default function Kitchen() {
         
         try {
             const updatedMetadata = { ...currentMetadata, kitchen_status: newStatus };
+            
+            // Blindaje de Seguridad: Nos aseguramos de modificar SOLO si la org_id coincide
             const { error } = await supabase
                 .from('operations')
                 .update({ metadata: updatedMetadata })
-                .eq('id', operationId);
+                .eq('id', operationId)
+                .eq('organization_id', orgData.id);
 
             if (error) throw error;
+            
+            // Actualización Local (Optimistic UI) para no tener que recargar toda la página
             setOrders(prev => prev.map(op => op.id === operationId ? { ...op, metadata: updatedMetadata } : op));
         } catch (error) {
-            toast.error('No se pudo actualizar el estado');
+            toast.error('No se pudo actualizar el estado de la comanda.');
         }
     };
 
+    // Clasificación de Órdenes
     const pendingOrders = orders.filter(o => !o.metadata?.kitchen_status || o.metadata.kitchen_status === 'pending');
     const preparingOrders = orders.filter(o => o.metadata?.kitchen_status === 'preparing');
     const readyOrders = orders.filter(o => o.metadata?.kitchen_status === 'ready');
 
-    // Componente interno para las tarjetas
+    // =========================================================================
+    // COMPONENTE: Tarjeta de Comanda Individual (Reutilizable)
+    // =========================================================================
     const TicketCard = ({ order, type }: { order: any, type: 'pending' | 'preparing' | 'ready' }) => (
         <div className={`bg-white rounded-2xl shadow-sm border p-5 flex flex-col animate-in slide-in-from-bottom-2 duration-300 ${
             type === 'pending' ? 'border-amber-200' : type === 'preparing' ? 'border-blue-200' : 'border-emerald-200'
         }`}>
+            {/* Cabecera del Ticket */}
             <div className="flex justify-between items-start mb-4 border-b border-slate-100 pb-3">
                 <div>
                     <h3 className="font-black text-xl text-slate-800">{order.metadata?.table_name || 'Sin Mesa'}</h3>
@@ -124,12 +141,13 @@ export default function Kitchen() {
                     </p>
                 </div>
                 {canInteract && (
-                    <button onClick={() => handlePrint(order)} className="p-2.5 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-xl transition-colors bg-slate-50 border border-slate-100">
+                    <button onClick={() => handlePrint(order)} className="p-2.5 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-xl transition-colors bg-slate-50 border border-slate-100" title="Imprimir Comanda">
                         <Printer className="w-5 h-5" />
                     </button>
                 )}
             </div>
             
+            {/* Lista de Platos */}
             <div className="flex-1 space-y-3.5 mb-6">
                 {order.items.map((item: any, idx: number) => (
                     <div key={idx} className="flex flex-col">
@@ -146,6 +164,7 @@ export default function Kitchen() {
                 ))}
             </div>
 
+            {/* Acciones Inferiores (Los botones cambian según el estado del ticket) */}
             <div className="mt-auto">
                 {!canInteract ? (
                     <div className="w-full py-3 bg-slate-50 text-slate-400 rounded-xl font-bold text-sm text-center border border-slate-100 uppercase tracking-widest">
@@ -174,13 +193,16 @@ export default function Kitchen() {
         </div>
     );
 
-    if (loading) return <div className="p-12 text-center text-slate-500 flex justify-center"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+    if (loading) return <div className="p-12 text-center text-slate-500 flex justify-center animate-in fade-in"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
+    // =========================================================================
+    // RENDER PRINCIPAL DE LA COCINA
+    // =========================================================================
     return (
-        <div className="min-h-screen bg-slate-50 -m-4 sm:-m-8 p-4 sm:p-8 font-sans">
+        <div className="min-h-screen bg-slate-50 -m-4 sm:-m-8 p-4 sm:p-8 font-sans animate-in fade-in duration-500">
             <div className="print:hidden max-w-7xl mx-auto">
                 
-                {/* CABECERA */}
+                {/* --- CABECERA SUPERIOR --- */}
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
                     <div>
                         <h1 className="text-2xl sm:text-3xl font-black text-slate-800 flex items-center gap-3 tracking-tight">
@@ -195,45 +217,45 @@ export default function Kitchen() {
                                 className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-bold text-sm transition-all border ${
                                     isInteractiveMode 
                                     ? 'bg-orange-500 border-orange-600 text-white shadow-lg shadow-orange-500/20' 
-                                    : 'bg-white border-slate-200 text-slate-500'
+                                    : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-100'
                                 }`}
                             >
                                 {isInteractiveMode ? <Hand className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                                 {isInteractiveMode ? 'Modo Interactivo' : 'Modo Lectura'}
                             </button>
                         )}
-                        <button onClick={fetchKitchenOrders} className="p-3 bg-white border border-slate-200 rounded-xl shadow-sm text-slate-500 hover:text-brand-600 transition-colors">
+                        <button onClick={fetchKitchenOrders} className="p-3 bg-white border border-slate-200 rounded-xl shadow-sm text-slate-500 hover:text-brand-600 transition-colors" title="Actualizar">
                             <RefreshCw className={`w-5 h-5 ${refreshing ? 'animate-spin' : ''}`} />
                         </button>
                     </div>
                 </div>
 
-                {/* --- PESTAÑAS PARA MÓVIL --- */}
-                <div className="md:hidden flex bg-slate-200/50 p-1 rounded-xl mb-6">
+                {/* --- PESTAÑAS DE NAVEGACIÓN (Solo Móvil) --- */}
+                <div className="md:hidden flex bg-white p-1.5 rounded-2xl mb-6 shadow-sm border border-slate-200 gap-1">
                     <button 
                         onClick={() => setActiveMobileTab('pending')}
-                        className={`flex-1 flex flex-col items-center justify-center py-2.5 rounded-lg text-sm font-bold transition-all ${activeMobileTab === 'pending' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}
+                        className={`flex-1 flex flex-col items-center justify-center py-2.5 rounded-xl text-sm font-bold transition-all ${activeMobileTab === 'pending' ? 'bg-amber-50 text-amber-700 shadow-sm border border-amber-200' : 'text-slate-500 hover:bg-slate-50'}`}
                     >
                         <span className="flex items-center gap-1.5"><ListTodo className="w-4 h-4 text-amber-500" /> Pendientes</span>
-                        <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full mt-1">{pendingOrders.length}</span>
+                        <span className="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md mt-1">{pendingOrders.length}</span>
                     </button>
                     <button 
                         onClick={() => setActiveMobileTab('preparing')}
-                        className={`flex-1 flex flex-col items-center justify-center py-2.5 rounded-lg text-sm font-bold transition-all ${activeMobileTab === 'preparing' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}
+                        className={`flex-1 flex flex-col items-center justify-center py-2.5 rounded-xl text-sm font-bold transition-all ${activeMobileTab === 'preparing' ? 'bg-blue-50 text-blue-700 shadow-sm border border-blue-200' : 'text-slate-500 hover:bg-slate-50'}`}
                     >
                         <span className="flex items-center gap-1.5"><Flame className="w-4 h-4 text-blue-500" /> Preparando</span>
-                        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full mt-1">{preparingOrders.length}</span>
+                        <span className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded-md mt-1">{preparingOrders.length}</span>
                     </button>
                     <button 
                         onClick={() => setActiveMobileTab('ready')}
-                        className={`flex-1 flex flex-col items-center justify-center py-2.5 rounded-lg text-sm font-bold transition-all ${activeMobileTab === 'ready' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}
+                        className={`flex-1 flex flex-col items-center justify-center py-2.5 rounded-xl text-sm font-bold transition-all ${activeMobileTab === 'ready' ? 'bg-emerald-50 text-emerald-700 shadow-sm border border-emerald-200' : 'text-slate-500 hover:bg-slate-50'}`}
                     >
                         <span className="flex items-center gap-1.5"><CheckCircle2 className="w-4 h-4 text-emerald-500" /> Listos</span>
-                        <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full mt-1">{readyOrders.length}</span>
+                        <span className="text-xs bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md mt-1">{readyOrders.length}</span>
                     </button>
                 </div>
 
-                {/* --- GRILLA PRINCIPAL --- */}
+                {/* --- GRILLA PRINCIPAL (KDS en formato Kanban para Desktop) --- */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 h-auto md:h-[calc(100vh-140px)]">
                     
                     {/* COLUMNA 1: PENDIENTES */}
@@ -281,7 +303,7 @@ export default function Kitchen() {
                 </div>
             </div>
 
-            {/* ZONA DE IMPRESIÓN (Queda igual) */}
+            {/* --- ZONA DE IMPRESIÓN (Invisible salvo al imprimir) --- */}
             {orderToPrint && (
                 <div className="hidden print:block w-[80mm] text-black bg-white font-mono text-sm leading-tight">
                     <div className="text-center font-bold text-xl mb-2 border-b-2 border-dashed border-black pb-2">

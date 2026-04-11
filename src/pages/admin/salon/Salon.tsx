@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { useAuthStore } from '../../../store/authStore';
-import { Plus, LayoutGrid, Armchair, Users, Receipt, Pencil } from 'lucide-react';
+import { Plus, LayoutGrid, Armchair, Users, Receipt, Pencil, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import CreateTableModal from '../../../components/CreateTableModal';
 import TablePOSModal from '../../../components/TablePOSModal';
@@ -11,11 +11,15 @@ export default function Salon() {
     const [tables, setTables] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     
+    // Estados para Modales
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [selectedTable, setSelectedTable] = useState<any | null>(null);
 
     const isOwnerOrAdmin = userRole === 'owner' || userRole === 'admin';
 
+    // =========================================================================
+    // INICIALIZACIÓN
+    // =========================================================================
     useEffect(() => {
         if (orgData?.id) {
             fetchSalonData();
@@ -26,6 +30,7 @@ export default function Salon() {
         try {
             setLoading(true);
             
+            // 1. Traemos todas las mesas activas de este local
             const { data: resourcesData, error: resourcesError } = await supabase
                 .from('resources')
                 .select('*')
@@ -35,6 +40,7 @@ export default function Salon() {
 
             if (resourcesError) throw resourcesError;
             
+            // 2. Traemos todas las comandas (operaciones pendientes) de este local
             const { data: activeOrders, error: ordersError } = await supabase
                 .from('operations')
                 .select('id, total_amount, metadata')
@@ -43,8 +49,10 @@ export default function Salon() {
 
             if (ordersError) throw ordersError;
 
+            // 3. Filtramos recursos que sean específicamente mesas
             const onlyTables = (resourcesData || []).filter(item => item.availability_rules?.is_table === true);
             
+            // 4. Cruzamos los datos: A cada mesa le asignamos su comanda activa (si la tiene)
             const tablesWithOrders = onlyTables.map(table => {
                 const currentOrder = activeOrders?.find(order => order.metadata?.table_id === table.id);
                 return {
@@ -56,26 +64,33 @@ export default function Salon() {
             setTables(tablesWithOrders);
         } catch (error) {
             console.error('Error fetching salon data:', error);
-            toast.error('Error al cargar el salón');
+            toast.error('Error al cargar el mapa del salón.');
         } finally {
             setLoading(false);
         }
     }
 
-    // --- NUEVA FUNCIÓN: Renombrar Mesa ---
+    // =========================================================================
+    // HANDLERS SECUNDARIOS (Edición Rápida)
+    // =========================================================================
     const handleRenameTable = async (e: React.MouseEvent, table: any) => {
-        e.stopPropagation(); // Evita que se abra el modal del POS al hacer clic en el lápiz
+        // Detenemos la propagación para no abrir el modal de ventas de la mesa sin querer
+        e.stopPropagation(); 
+        
         const newName = window.prompt('Ingresá el nuevo nombre para la mesa:', table.name);
         
-        if (!newName || newName.trim() === '' || newName === table.name) return;
+        // Validamos que no esté vacío, cancelado o sea igual al anterior
+        if (newName === null || !newName.trim() || newName.trim() === table.name) return;
 
         try {
             const { error } = await supabase
                 .from('resources')
                 .update({ name: newName.trim() })
-                .eq('id', table.id);
+                .eq('id', table.id)
+                .eq('organization_id', orgData?.id); // Blindaje extra
 
             if (error) throw error;
+            
             toast.success('Mesa renombrada con éxito');
             fetchSalonData();
         } catch (error) {
@@ -83,8 +98,13 @@ export default function Salon() {
         }
     };
 
+    // =========================================================================
+    // RENDER PRINCIPAL DEL SALÓN
+    // =========================================================================
     return (
         <div className="pb-24 lg:pb-0 animate-in fade-in duration-500">
+            
+            {/* Modales Flotantes */}
             <CreateTableModal
                 isOpen={isCreateModalOpen}
                 onClose={() => setIsCreateModalOpen(false)}
@@ -95,11 +115,12 @@ export default function Salon() {
                 isOpen={!!selectedTable}
                 onClose={() => {
                     setSelectedTable(null);
-                    fetchSalonData(); 
+                    fetchSalonData(); // Refrescamos el salón al cerrar la mesa
                 }}
                 table={selectedTable}
             />
 
+            {/* Cabecera */}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
                 <div>
                     <h1 className="text-2xl sm:text-3xl font-black text-slate-800 tracking-tight">Mapa del Salón</h1>
@@ -116,10 +137,14 @@ export default function Salon() {
                 )}
             </div>
 
+            {/* Grilla de Mesas */}
             {loading ? (
-                <div className="p-12 text-center text-slate-400 font-medium">Cargando disposición del salón...</div>
+                <div className="p-16 flex flex-col items-center justify-center text-slate-400 gap-4 animate-in fade-in duration-500">
+                    <Loader2 className="w-10 h-10 animate-spin text-brand-500" />
+                    <p className="font-bold tracking-wide uppercase text-sm">Cargando disposición del salón...</p>
+                </div>
             ) : tables.length === 0 ? (
-                <div className="bg-white p-12 rounded-3xl border border-slate-100 text-center flex flex-col items-center shadow-sm">
+                <div className="bg-white p-12 rounded-3xl border border-slate-100 text-center flex flex-col items-center shadow-sm animate-in fade-in zoom-in-95 duration-500">
                     <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-4">
                         <LayoutGrid className="w-10 h-10 text-slate-300" />
                     </div>
@@ -127,7 +152,6 @@ export default function Salon() {
                     <p className="text-slate-500 mt-2 max-w-md">Creá tu primera mesa para empezar a tomar pedidos y organizar tu espacio.</p>
                 </div>
             ) : (
-                /* Grilla mejorada para móviles (1 col en celus muy chicos, 2 normales, etc) */
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4 sm:gap-6">
                     {tables.map((table) => {
                         const isOccupied = !!table.activeOrder;
@@ -142,10 +166,10 @@ export default function Salon() {
                                     : 'shadow-sm border-2 border-slate-100 hover:border-emerald-300 hover:shadow-md hover:shadow-emerald-500/10'
                                 }`}
                             >
-                                {/* Barra de estado superior */}
+                                {/* Barra de estado superior (Roja = Ocupada, Verde = Libre) */}
                                 <div className={`absolute top-0 left-0 w-full h-1.5 transition-colors ${isOccupied ? 'bg-red-500' : 'bg-emerald-400'}`}></div>
 
-                                {/* Botón de Edición (Solo Dueños) */}
+                                {/* Botón de Edición (Solo Dueños) - Se muestra al pasar el mouse (hover) */}
                                 {isOwnerOrAdmin && (
                                     <button 
                                         onClick={(e) => handleRenameTable(e, table)}

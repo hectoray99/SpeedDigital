@@ -17,8 +17,7 @@ export const usePortalStore = create<PortalState>()(
             logoutStudent: () => set({ studentId: null, orgSlug: null }),
         }),
         {
-            name: 'portal-session', // Nombre de la variable en memoria
-            // CLAVE: Usamos sessionStorage para que la sesión muera al cerrar la pestaña
+            name: 'sd-portal-session', // Prefijo sd (speeddigital)
             storage: createJSONStorage(() => sessionStorage),
         }
     )

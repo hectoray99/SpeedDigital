@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
-import { Loader2, User, CheckCircle, AlertCircle, Calendar, ArrowRight, Clock, Hash, Delete } from 'lucide-react';
+import { Loader2, User, CheckCircle, AlertCircle, Calendar, Clock, Hash, Delete, ChevronRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface GymAttendanceProps {
@@ -20,6 +20,9 @@ export default function GymAttendancePublic({ orgData }: GymAttendanceProps) {
         planInfo: any;
     } | null>(null);
 
+    // =========================================================================
+    // AUTO-RESET: Vuelve al teclado después de 8 segundos de mostrar el resultado
+    // =========================================================================
     useEffect(() => {
         if (studentData) {
             const timer = setTimeout(() => {
@@ -36,7 +39,9 @@ export default function GymAttendancePublic({ orgData }: GymAttendanceProps) {
         setError(null);
     };
 
-    // --- NUEVO: Función para el teclado numérico en pantalla ---
+    // =========================================================================
+    // TECLADO VIRTUAL
+    // =========================================================================
     const handleKeypadPress = (num: string) => {
         if (identifier.length < 10) setIdentifier(prev => prev + num);
         setError(null);
@@ -46,6 +51,9 @@ export default function GymAttendancePublic({ orgData }: GymAttendanceProps) {
         setIdentifier(prev => prev.slice(0, -1));
     };
 
+    // =========================================================================
+    // VERIFICACIÓN DEL DNI EN LA BASE DE DATOS
+    // =========================================================================
     const handleSearch = async (e?: React.FormEvent) => {
         if (e) e.preventDefault();
         if (!identifier.trim()) return;
@@ -54,6 +62,7 @@ export default function GymAttendancePublic({ orgData }: GymAttendanceProps) {
         setError(null);
 
         try {
+            // 1. Buscamos el alumno en este local
             const { data: person, error: personError } = await supabase
                 .from('crm_people')
                 .select('id, full_name, details')
@@ -65,6 +74,7 @@ export default function GymAttendancePublic({ orgData }: GymAttendanceProps) {
             if (personError) throw personError;
             if (!person) throw new Error('No se encontró el alumno o está inactivo.');
 
+            // 2. Extraemos planes (soportando versiones viejas del JSONB)
             let activePlans = person.details?.active_plans || [];
             if (activePlans.length === 0 && person.details?.active_plan) {
                 activePlans = [person.details.active_plan];
@@ -74,6 +84,7 @@ export default function GymAttendancePublic({ orgData }: GymAttendanceProps) {
                 throw new Error('El alumno no tiene ningún plan activo asignado.');
             }
 
+            // 3. Verificamos deudas
             const { data: debts } = await supabase
                 .from('operations')
                 .select('balance')
@@ -91,6 +102,7 @@ export default function GymAttendancePublic({ orgData }: GymAttendanceProps) {
             if (totalDebt > 0) {
                 rejectReason = 'Deuda Pendiente';
             } else {
+                // 4. Verificamos Horarios de Acceso
                 const currentHour = new Date().getHours();
                 const now = new Date();
 
@@ -98,8 +110,9 @@ export default function GymAttendancePublic({ orgData }: GymAttendanceProps) {
                     const plan = activePlans[i];
                     const expiresDate = new Date(plan.expires_at);
 
-                    if (now > expiresDate) continue;
-                    if (plan.mode === 'classes' && plan.remaining_classes <= 0) continue;
+                    if (now > expiresDate) continue; // Vencido
+                    if (plan.mode === 'classes' && plan.remaining_classes <= 0) continue; // Sin saldo de clases
+                    // Controles horarios
                     if (plan.schedule === 'morning' && (currentHour < 5 || currentHour >= 12)) continue;
                     if (plan.schedule === 'afternoon' && (currentHour < 12 || currentHour >= 18)) continue;
                     if (plan.schedule === 'night' && (currentHour < 18)) continue;
@@ -111,6 +124,7 @@ export default function GymAttendancePublic({ orgData }: GymAttendanceProps) {
                 }
             }
 
+            // 5. Aplicar Reglas: Descontar clase si corresponde
             if (isAllowed && matchedPlan) {
                 await supabase.from('appointments').insert([{
                     organization_id: orgData.id,
@@ -128,6 +142,7 @@ export default function GymAttendancePublic({ orgData }: GymAttendanceProps) {
                     matchedPlan.remaining_classes = activePlans[matchedPlanIndex].remaining_classes;
                 }
             } else {
+                // Si fue rechazado, mostramos el primer plan para dar contexto en la tarjeta roja
                 matchedPlan = activePlans[0];
             }
 
@@ -141,33 +156,39 @@ export default function GymAttendancePublic({ orgData }: GymAttendanceProps) {
 
         } catch (err: any) {
             setError(err.message);
-            setTimeout(() => setError(null), 3000);
+            setTimeout(() => setError(null), 4000);
         } finally {
             setLoading(false);
         }
     };
 
+    // =========================================================================
+    // RENDER PRINCIPAL
+    // =========================================================================
     return (
         <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center p-4 relative overflow-hidden text-white font-sans selection:bg-brand-500/30">
             
-            {/* --- FONDO ANIMADO --- */}
+            {/* FONDO ANIMADO Y TEXTURA */}
             <div className="absolute top-0 right-0 w-[40rem] h-[40rem] bg-brand-600 rounded-full mix-blend-screen filter blur-[120px] opacity-20 animate-pulse duration-[8s] -z-10"></div>
             <div className="absolute bottom-0 left-0 w-[40rem] h-[40rem] bg-indigo-600 rounded-full mix-blend-screen filter blur-[120px] opacity-10 animate-pulse duration-[12s] -z-10"></div>
+            <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-[0.03] mix-blend-overlay -z-10"></div>
 
+            {/* HEADER LOGO */}
             <div className="absolute top-8 left-0 right-0 text-center z-10 px-4">
                 {orgData.logo_url && (
-                    <img src={orgData.logo_url} alt="Logo" className="h-16 w-auto mx-auto mb-4 rounded-2xl shadow-2xl border border-white/10" />
+                    <img src={orgData.logo_url} alt="Logo" className="h-16 w-auto mx-auto mb-4 rounded-2xl shadow-2xl border border-white/10 object-cover" />
                 )}
                 <h1 className="text-2xl md:text-3xl font-black uppercase tracking-widest text-white drop-shadow-md">
                     {orgData.name}
                 </h1>
             </div>
 
+            {/* CONTENEDOR CENTRAL */}
             <div className="w-full max-w-md relative z-20 mt-16 md:mt-24">
                 <AnimatePresence mode="wait">
                     {!studentData || !accessStatus ? (
                         <motion.div
-                            key="input"
+                            key="teclado_input"
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0, y: -20 }}
@@ -176,7 +197,7 @@ export default function GymAttendancePublic({ orgData }: GymAttendanceProps) {
                             <h2 className="text-xl md:text-2xl font-bold mb-6 text-slate-200">Control de Acceso</h2>
                             
                             <form onSubmit={handleSearch} className="flex flex-col gap-6">
-                                {/* Input visual (solo lectura para que usen el teclado de abajo) */}
+                                {/* PANTALLITA DEL DNI */}
                                 <div className="bg-black border-2 border-white/5 rounded-2xl p-4 md:p-5 text-center min-h-[5rem] flex items-center justify-center shadow-inner">
                                     {identifier ? (
                                         <span className="text-3xl md:text-4xl font-black tracking-[0.2em] text-white">
@@ -189,7 +210,7 @@ export default function GymAttendancePublic({ orgData }: GymAttendanceProps) {
                                     )}
                                 </div>
 
-                                {/* --- TECLADO NUMÉRICO GIGANTE --- */}
+                                {/* TECLADO NUMÉRICO */}
                                 <div className="grid grid-cols-3 gap-3 md:gap-4">
                                     {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(num => (
                                         <button
@@ -220,10 +241,11 @@ export default function GymAttendancePublic({ orgData }: GymAttendanceProps) {
                                         disabled={loading || !identifier}
                                         className="bg-brand-600 hover:bg-brand-500 disabled:bg-slate-800 disabled:text-slate-500 border border-brand-500/50 disabled:border-transparent text-white py-4 md:py-5 rounded-2xl transition-all active:scale-95 flex items-center justify-center shadow-[0_0_20px_-5px_rgba(79,70,229,0.5)] disabled:shadow-none"
                                     >
-                                        {loading ? <Loader2 className="w-8 h-8 animate-spin" /> : <ArrowRight className="w-8 h-8" />}
+                                        {loading ? <Loader2 className="w-8 h-8 animate-spin" /> : <ChevronRight className="w-8 h-8" />}
                                     </button>
                                 </div>
 
+                                {/* MENSAJE DE ERROR RAPIDO (EJ: Alumno no encontrado) */}
                                 {error && (
                                     <p className="text-red-400 text-sm font-bold mt-2 animate-in fade-in slide-in-from-top-2">{error}</p>
                                 )}
@@ -231,23 +253,25 @@ export default function GymAttendancePublic({ orgData }: GymAttendanceProps) {
                         </motion.div>
                     ) : (
                         <motion.div
-                            key="result"
+                            key="resultado_accesso"
                             initial={{ opacity: 0, scale: 0.95 }}
                             animate={{ opacity: 1, scale: 1 }}
                             exit={{ opacity: 0, scale: 1.05 }}
                             className="bg-white rounded-[2.5rem] shadow-2xl overflow-hidden text-slate-900 border border-slate-200"
                         >
+                            {/* CABECERA (Verde o Roja) */}
                             <div className={`p-8 text-center transition-colors duration-500 ${!accessStatus.allowed ? 'bg-red-500 text-white' : 'bg-emerald-500 text-white'}`}>
                                 {!accessStatus.allowed ? (
                                     <AlertCircle className="w-20 h-20 mx-auto mb-4 animate-in zoom-in" />
                                 ) : (
                                     <CheckCircle className="w-20 h-20 mx-auto mb-4 animate-in zoom-in" />
                                 )}
-                                <h2 className="text-3xl font-black uppercase tracking-widest leading-tight">
+                                <h2 className="text-2xl md:text-3xl font-black uppercase tracking-widest leading-tight">
                                     {!accessStatus.allowed ? accessStatus.reason : 'Acceso Permitido'}
                                 </h2>
                             </div>
 
+                            {/* FOTO Y DATOS DEL ALUMNO */}
                             <div className="p-8 text-center bg-slate-50">
                                 <div className="relative w-32 h-32 md:w-40 md:h-40 mx-auto mb-6">
                                     {studentData.details?.photo_url ? (
@@ -266,12 +290,15 @@ export default function GymAttendancePublic({ orgData }: GymAttendanceProps) {
                                 <h3 className="text-2xl md:text-3xl font-black text-slate-800 mb-1">{studentData.full_name}</h3>
                                 <p className="text-slate-500 font-bold mb-8 uppercase tracking-widest text-sm">DNI: {identifier}</p>
 
+                                {/* DETALLES DEL RECHAZO O ÉXITO */}
                                 {!accessStatus.allowed ? (
                                     <div className="bg-red-50 border border-red-200 rounded-2xl p-5 text-red-700 shadow-sm">
                                         <p className="font-bold text-lg mb-2">Por favor, pasá por recepción.</p>
+                                        
                                         {accessStatus.debtAmount > 0 && (
                                             <p className="text-2xl font-black bg-white/50 py-2 rounded-xl border border-red-100 inline-block px-4">Deuda: ${accessStatus.debtAmount.toLocaleString()}</p>
                                         )}
+                                        
                                         {accessStatus.planInfo && new Date() > new Date(accessStatus.planInfo.expires_at) && (
                                             <p className="text-sm mt-3 bg-white/50 py-2 rounded-xl border border-red-100">El plan <span className="font-bold">{accessStatus.planInfo.name}</span> está vencido.</p>
                                         )}
@@ -306,7 +333,7 @@ export default function GymAttendancePublic({ orgData }: GymAttendanceProps) {
                                 )}
                             </div>
 
-                            {/* Barra de progreso de cierre automático */}
+                            {/* BARRA DE PROGRESO INFERIOR (8 SEGUNDOS) */}
                             <div className="h-2 w-full bg-slate-100">
                                 <motion.div
                                     className={`h-full ${!accessStatus.allowed ? 'bg-red-500' : 'bg-emerald-500'}`}

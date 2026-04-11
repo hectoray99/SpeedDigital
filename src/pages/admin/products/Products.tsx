@@ -2,14 +2,13 @@ import { useEffect, useState, useRef } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { useAuthStore } from '../../../store/authStore';
 import { uploadToCloudinary } from '../../../services/cloudinary';
-import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import {
     Loader2, Plus, Search, Edit2, PackageOpen,
     Image as ImageIcon, CheckCircle2, XCircle,
-    X, Trash2, Clock, Dumbbell, UploadCloud,Hash
+    X, Trash2, Clock, Dumbbell, UploadCloud, Hash,Save
 } from 'lucide-react';
 
 interface FormData {
@@ -53,6 +52,9 @@ export default function Products() {
         imageUrls: [], isActive: true,
     });
 
+    // =========================================================================
+    // INICIALIZACIÓN
+    // =========================================================================
     useEffect(() => {
         if (orgData?.id) fetchProducts();
     }, [orgData?.id]);
@@ -76,10 +78,16 @@ export default function Products() {
         }
     }
 
+    // =========================================================================
+    // HANDLERS DEL MODAL (Abir / Cerrar / Editar)
+    // =========================================================================
     const openModal = (product?: any) => {
-        if (product) {
+        // Blindaje extra: Si "product" existe y tiene "id", es un producto real (Edición)
+        if (product && product.id) {
             setEditingId(product.id);
             let urls: string[] = [];
+            
+            // Retrocompatibilidad: Soportar imagen única (string) o array de imágenes
             if (Array.isArray(product.properties?.image_urls)) {
                 urls = product.properties.image_urls;
             } else if (typeof product.properties?.image_url === 'string' && product.properties.image_url) {
@@ -98,6 +106,7 @@ export default function Products() {
                 isActive: product.is_active,
             });
         } else {
+            // Alta de uno Nuevo
             setEditingId(null);
             setFormData({
                 name: '', price: '', category: '', description: '',
@@ -108,16 +117,19 @@ export default function Products() {
         setIsModalOpen(true);
     };
 
+    // =========================================================================
+    // MANEJO DE IMÁGENES (Subida y Borrado)
+    // =========================================================================
     const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = Array.from(e.target.files || []);
         if (files.length === 0) return;
-        if (formData.imageUrls.length + files.length > 5) return toast.error('Máximo 5 imágenes');
+        if (formData.imageUrls.length + files.length > 5) return toast.error('Máximo 5 imágenes por ítem');
         
         setIsUploadingImage(true);
         try {
             const uploadPromises = files.map(async (file) => {
-                if (!file.type.startsWith('image/')) throw new Error('Solo imágenes');
-                if (file.size > 5 * 1024 * 1024) throw new Error('Máximo 5MB por imagen');
+                if (!file.type.startsWith('image/')) throw new Error('El archivo debe ser una imagen');
+                if (file.size > 5 * 1024 * 1024) throw new Error('El archivo no puede pesar más de 5MB');
                 return await uploadToCloudinary(file);
             });
             const newSecureUrls = await Promise.all(uploadPromises);
@@ -133,10 +145,13 @@ export default function Products() {
 
     const removeImage = (i: number) => setFormData(p => ({ ...p, imageUrls: p.imageUrls.filter((_, idx) => idx !== i) }));
 
+    // =========================================================================
+    // GUARDADO EN BASE DE DATOS
+    // =========================================================================
     const handleSave = async () => {
-        if (!formData.name.trim() || !formData.price || !orgData?.id) {
-            return toast.error('Nombre y Precio son obligatorios');
-        }
+        if (!formData.name.trim()) return toast.error('El nombre es obligatorio');
+        if (formData.price === '' || Number(formData.price) < 0) return toast.error('Ingresá un precio válido (mayor a 0)');
+        if (!orgData?.id) return;
 
         setIsSaving(true);
         try {
@@ -152,10 +167,12 @@ export default function Products() {
                     category: formData.category.trim() || 'General',
                     description: formData.description.trim(),
                     image_urls: formData.imageUrls,
+                    // Para compatibilidad vieja mantenemos image_url con la primera foto
                     image_url: formData.imageUrls.length > 0 ? formData.imageUrls[0] : null,
                 }
             };
 
+            // Inyectamos propiedades dinámicas según rubro
             if (isGym) {
                 productPayload.properties.plan_mode = formData.plan_mode;
                 if (formData.plan_mode === 'classes') {
@@ -168,17 +185,17 @@ export default function Products() {
             if (editingId) {
                 const { error } = await supabase.from('catalog_items').update(productPayload).eq('id', editingId);
                 if (error) throw error;
-                toast.success('Actualizado correctamente');
+                toast.success('Ítem actualizado correctamente');
             } else {
                 const { error } = await supabase.from('catalog_items').insert([productPayload]);
                 if (error) throw error;
-                toast.success('Creado exitosamente');
+                toast.success('Ítem creado exitosamente');
             }
 
             setIsModalOpen(false);
             fetchProducts();
         } catch (error) {
-            toast.error('Error al guardar en la base de datos');
+            toast.error('Error de base de datos al guardar.');
         } finally {
             setIsSaving(false);
         }
@@ -187,33 +204,41 @@ export default function Products() {
     const toggleStatus = async (id: string, currentStatus: boolean) => {
         try {
             await supabase.from('catalog_items').update({ is_active: !currentStatus }).eq('id', id);
+            // Optimistic UI Update
             setProducts(products.map(p => p.id === id ? { ...p, is_active: !currentStatus } : p));
-            toast.success(currentStatus ? 'Pausado' : 'Activado');
+            toast.success(currentStatus ? 'Ítem pausado' : 'Ítem activado');
         } catch { 
-            toast.error("Error al cambiar estado"); 
+            toast.error("Error al cambiar el estado"); 
         }
     };
 
     const filteredProducts = products.filter(p => p.name.toLowerCase().includes(search.toLowerCase()));
 
-    if (loading) return <div className="p-16 flex flex-col items-center justify-center text-slate-400 gap-4"><Loader2 className="w-10 h-10 animate-spin text-brand-500" /><p className="font-bold">Cargando catálogo...</p></div>;
+    if (loading) return <div className="p-16 flex flex-col items-center justify-center text-slate-400 gap-4 animate-in fade-in duration-500"><Loader2 className="w-10 h-10 animate-spin text-brand-500" /><p className="font-bold uppercase tracking-widest text-sm">Cargando catálogo...</p></div>;
 
+    const TopIcon = ui.icon;
+
+    // =========================================================================
+    // RENDER PRINCIPAL
+    // =========================================================================
     return (
         <div className="max-w-6xl mx-auto space-y-6 pb-12 animate-in fade-in duration-500">
             
+            {/* CABECERA */}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div>
                     <h1 className="text-3xl font-black text-slate-800 flex items-center gap-3 tracking-tight">
-                        <div className="p-2 bg-brand-100 rounded-xl"><ui.icon className="w-6 h-6 text-brand-600" /></div>
+                        <div className="p-2 bg-brand-100 rounded-xl"><TopIcon className="w-6 h-6 text-brand-600" /></div>
                         {ui.title}
                     </h1>
-                    <p className="text-slate-500 font-medium mt-2">{ui.subtitle}</p>
+                    <p className="text-slate-500 font-medium mt-2 text-base">{ui.subtitle}</p>
                 </div>
                 <button onClick={() => openModal()} className="w-full sm:w-auto bg-brand-600 hover:bg-brand-500 text-white px-6 py-3.5 rounded-xl font-bold shadow-lg shadow-brand-500/30 transition-all flex items-center justify-center gap-2 active:scale-95 text-sm md:text-base">
                     <Plus className="w-5 h-5" /> {ui.btnNew}
                 </button>
             </div>
 
+            {/* BUSCADOR */}
             <div className="bg-white p-2.5 rounded-2xl shadow-sm border border-slate-200 mb-6">
                 <div className="relative">
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
@@ -221,23 +246,24 @@ export default function Products() {
                 </div>
             </div>
 
+            {/* TABLA DE CATÁLOGO */}
             <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
                 <div className="overflow-x-auto hide-scrollbar">
                     <table className="w-full text-left min-w-[800px]">
                         <thead>
                             <tr className="bg-slate-50 border-b border-slate-100 text-slate-500 text-xs uppercase tracking-widest font-bold">
-                                <th className="px-6 py-4">{ui.itemLabel} y Detalle</th>
-                                <th className="px-6 py-4">Categoría</th>
-                                {isServiceBased && <th className="px-6 py-4">Duración</th>}
-                                {isGym && <th className="px-6 py-4">Modalidad</th>}
-                                <th className="px-6 py-4">Precio</th>
-                                <th className="px-6 py-4 text-center">Estado</th>
-                                <th className="px-6 py-4 text-right">Acciones</th>
+                                <th className="px-6 py-5">{ui.itemLabel} y Detalle</th>
+                                <th className="px-6 py-5">Categoría</th>
+                                {isServiceBased && <th className="px-6 py-5">Duración</th>}
+                                {isGym && <th className="px-6 py-5">Modalidad</th>}
+                                <th className="px-6 py-5">Precio</th>
+                                <th className="px-6 py-5 text-center">Estado</th>
+                                <th className="px-6 py-5 text-right">Acciones</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50">
                             {filteredProducts.length === 0 ? (
-                                <tr><td colSpan={8} className="p-12 text-center text-slate-400 font-bold bg-slate-50/50">No se encontraron resultados.</td></tr>
+                                <tr><td colSpan={8} className="p-16 text-center text-slate-400 font-bold bg-slate-50/50 text-base">No se encontraron resultados.</td></tr>
                             ) : (
                                 filteredProducts.map((product) => {
                                     const firstImg = Array.isArray(product.properties?.image_urls) ? product.properties.image_urls[0] : product.properties?.image_url;
@@ -247,7 +273,7 @@ export default function Products() {
                                                 <div className="flex items-center gap-4">
                                                     {firstImg ? (
                                                         <div className="w-14 h-14 rounded-2xl shrink-0 relative border border-slate-100 bg-white shadow-sm p-1">
-                                                            <img src={firstImg} className="w-full h-full object-cover rounded-xl" />
+                                                            <img src={firstImg} className="w-full h-full object-cover rounded-xl" alt="" />
                                                             {product.properties?.image_urls?.length > 1 && (
                                                                 <span className="absolute -top-1.5 -right-1.5 bg-slate-800 text-white text-[9px] font-black w-5 h-5 flex items-center justify-center rounded-full border-2 border-white shadow-sm">
                                                                     {product.properties.image_urls.length}
@@ -284,7 +310,7 @@ export default function Products() {
                                                 </button>
                                             </td>
                                             <td className="px-6 py-4 text-right">
-                                                <button onClick={() => openModal(product)} className="p-2.5 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-xl transition-all focus:opacity-100 border border-transparent hover:border-brand-100 bg-white hover:shadow-sm"><Edit2 className="w-4 h-4" /></button>
+                                                <button onClick={() => openModal(product)} className="p-2.5 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-xl transition-all focus:opacity-100 border border-transparent hover:border-brand-100 bg-white hover:shadow-sm" title="Editar"><Edit2 className="w-4 h-4" /></button>
                                             </td>
                                         </tr>
                                     )
@@ -295,42 +321,47 @@ export default function Products() {
                 </div>
             </div>
 
-            {/* MODAL ABM */}
+            {/* ========================================================================= */}
+            {/* MODAL ALTA/MODIFICACIÓN (Sin Portales Sueltos) */}
+            {/* ========================================================================= */}
             <AnimatePresence>
-                {isModalOpen && createPortal(
-                    <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+                {isModalOpen && (
+                    <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
                         <motion.div 
                             initial={{ opacity: 0, scale: 0.95 }}
                             animate={{ opacity: 1, scale: 1 }}
                             exit={{ opacity: 0, scale: 0.95 }}
-                            className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+                            className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh] md:max-h-[90vh]"
                         >
                             <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
                                 <h2 className="text-xl font-black text-slate-800 flex items-center gap-2">
                                     {editingId ? <Edit2 className="w-5 h-5 text-brand-500" /> : <Plus className="w-5 h-5 text-brand-500" />}
                                     {editingId ? `Editar ${ui.itemLabel}` : `Nuevo ${ui.itemLabel}`}
                                 </h2>
-                                <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-slate-200 rounded-xl transition-colors"><X className="w-5 h-5 text-slate-400" /></button>
+                                <button onClick={() => setIsModalOpen(false)} disabled={isSaving} className="p-2 hover:bg-slate-200 rounded-xl transition-colors disabled:opacity-50"><X className="w-5 h-5 text-slate-400" /></button>
                             </div>
 
                             <div className="p-6 md:p-8 space-y-6 overflow-y-auto hide-scrollbar">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                                    
+                                    {/* Bloque Común */}
                                     <div className="md:col-span-2">
                                         <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Nombre *</label>
-                                        <input type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} placeholder={`Ej: ${isGym ? 'Pase Libre Mensual' : 'Corte Clásico'}`} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-brand-500/20 font-bold text-slate-800 transition-all" />
+                                        <input type="text" autoFocus value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} placeholder={`Ej: ${isGym ? 'Pase Libre Mensual' : 'Corte Clásico'}`} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-brand-500/20 focus:bg-white font-bold text-slate-800 transition-all" />
                                     </div>
                                     <div>
                                         <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Precio *</label>
-                                        <div className="relative">
+                                        <div className="relative shadow-sm rounded-2xl">
                                             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">$</span>
-                                            <input type="number" value={formData.price} onChange={e => setFormData({...formData, price: e.target.value})} placeholder="0.00" className="w-full pl-8 pr-4 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-brand-500/20 font-black text-slate-800 transition-all" />
+                                            <input type="number" min="0" value={formData.price} onChange={e => setFormData({...formData, price: e.target.value})} placeholder="0.00" className="w-full pl-9 pr-4 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-brand-500/20 focus:bg-white font-black text-slate-800 transition-all" />
                                         </div>
                                     </div>
                                     <div>
                                         <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Categoría *</label>
-                                        <input type="text" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})} placeholder="Ej: General" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-brand-500/20 font-bold uppercase tracking-wide text-slate-700 transition-all" />
+                                        <input type="text" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})} placeholder="Ej: General" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-brand-500/20 focus:bg-white font-bold uppercase tracking-wide text-slate-700 transition-all shadow-sm" />
                                     </div>
                                     
+                                    {/* Bloque Condicional por Industria */}
                                     {isGym ? (
                                         <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-5 bg-slate-50 p-5 rounded-2xl border border-slate-100 mt-2">
                                             <div>
@@ -343,16 +374,16 @@ export default function Products() {
                                             {formData.plan_mode === 'classes' && (
                                                 <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}>
                                                     <label className=" text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 flex items-center gap-1.5"><Hash className="w-4 h-4 text-slate-400" /> Cant. de Clases</label>
-                                                    <input type="number" value={formData.class_count} onChange={e => setFormData({...formData, class_count: e.target.value})} className="w-full p-4 bg-white border border-slate-200 rounded-xl outline-none font-black text-slate-800 shadow-sm" />
+                                                    <input type="number" value={formData.class_count} onChange={e => setFormData({...formData, class_count: e.target.value})} className="w-full p-4 bg-white border border-slate-200 rounded-xl outline-none font-black text-slate-800 shadow-sm focus:ring-2 focus:ring-brand-500/20" />
                                                 </motion.div>
                                             )}
                                         </div>
                                     ) : isServiceBased ? (
                                         <div className="md:col-span-2">
                                             <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Duración (minutos) *</label>
-                                            <div className="relative">
+                                            <div className="relative shadow-sm rounded-2xl">
                                                 <Clock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
-                                                <select value={formData.duration} onChange={e => setFormData({...formData, duration: e.target.value})} className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none cursor-pointer font-bold appearance-none text-slate-700 transition-all focus:ring-2 focus:ring-brand-500/20">
+                                                <select value={formData.duration} onChange={e => setFormData({...formData, duration: e.target.value})} className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none cursor-pointer font-bold appearance-none text-slate-700 transition-all focus:ring-2 focus:ring-brand-500/20 focus:bg-white">
                                                     <option value="15">15 minutos</option>
                                                     <option value="30">30 minutos</option>
                                                     <option value="45">45 minutos</option>
@@ -367,9 +398,10 @@ export default function Products() {
 
                                 <div>
                                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Descripción (Opcional)</label>
-                                    <textarea value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} placeholder="Detalles o condiciones especiales..." className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-brand-500/20 font-medium resize-none h-24 text-slate-700 transition-all" />
+                                    <textarea value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} placeholder="Detalles o condiciones especiales..." className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-brand-500/20 focus:bg-white font-medium resize-none h-24 text-slate-700 transition-all shadow-sm" />
                                 </div>
 
+                                {/* Bloque de Imágenes */}
                                 <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
                                     <div className="flex items-center justify-between mb-4">
                                         <label className=" text-xs font-bold text-slate-700 uppercase tracking-widest flex items-center gap-2"><ImageIcon className="w-4 h-4 text-brand-500" /> Galería de Fotos</label>
@@ -401,15 +433,15 @@ export default function Products() {
                                 </div>
                             </div>
 
-                            <div className="p-6 border-t border-slate-100 bg-slate-50 shrink-0 flex gap-3">
-                                <button onClick={() => setIsModalOpen(false)} className="flex-1 py-4 bg-white border border-slate-200 rounded-xl font-bold text-slate-600 hover:bg-slate-100 transition-colors">Cancelar</button>
+                            {/* Footer Modal */}
+                            <div className="p-4 md:p-6 border-t border-slate-100 bg-slate-50 shrink-0 flex gap-3 shadow-[0_-10px_20px_-10px_rgba(0,0,0,0.05)]">
+                                <button onClick={() => setIsModalOpen(false)} disabled={isSaving} className="flex-1 py-4 bg-white border border-slate-200 rounded-xl font-bold text-slate-600 hover:bg-slate-100 transition-colors disabled:opacity-50">Cancelar</button>
                                 <button onClick={handleSave} disabled={isSaving} className="flex-[2] py-4 bg-slate-900 text-white rounded-xl font-black hover:bg-slate-800 shadow-xl shadow-slate-900/20 disabled:opacity-50 transition-all flex items-center justify-center gap-2 active:scale-95 text-lg">
-                                    {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Guardar Ítem'}
+                                    {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />} Guardar Ítem
                                 </button>
                             </div>
                         </motion.div>
-                    </div>,
-                    document.body
+                    </div>
                 )}
             </AnimatePresence>
         </div>

@@ -44,6 +44,7 @@ import SuperAdminDashboard from './pages/superadmin/SuperAdminDashboard';
 import SuperAdminOrganizations from './pages/superadmin/SuperAdminOrganizations';
 import SuperAdminSubscriptions from './pages/superadmin/SuperAdminSubscriptions';
 import SuperAdminAnnouncements from './pages/superadmin/SuperAdminAnnouncements';
+import SuperAdminPromotions from './pages/superadmin/SuperAdminPromotions';
 
 import Resources from './pages/admin/services/Resources'; 
 
@@ -116,6 +117,7 @@ export default function App() {
             <Route path="/superadmin/dashboard" element={<SuperAdminDashboard />} />
             <Route path="/superadmin/organizations" element={<SuperAdminOrganizations />} />
             <Route path="/superadmin/subscriptions" element={<SuperAdminSubscriptions />} />
+            <Route path="/superadmin/promotions" element={<SuperAdminPromotions />} />
             <Route path="/superadmin/announcements" element={<SuperAdminAnnouncements />} />
             {/* Redirección por defecto */}
             <Route path="/superadmin" element={<Navigate to="/superadmin/dashboard" replace />} />

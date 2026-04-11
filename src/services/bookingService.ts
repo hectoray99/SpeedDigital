@@ -19,7 +19,7 @@ export const bookingService = {
         resourceId: string
     ) => {
         try {
-            // 1. Duración del servicio
+            // 1. Obtener duración del servicio
             const { data: service } = await supabase
                 .from('catalog_items')
                 .select('duration_minutes')
@@ -27,21 +27,20 @@ export const bookingService = {
                 .single();
                 
             if (!service) throw new Error('Servicio no encontrado');
-            
-            // Si no hay duración definida, asumimos 30 minutos por defecto
             const duration = service.duration_minutes || 30;
 
-            // 2. Reglas del Profesional (Recurso)
+            // 2. Obtener reglas de disponibilidad del Profesional
             const { data: resource } = await supabase
                 .from('resources')
                 .select('availability_rules')
                 .eq('id', resourceId)
                 .single();
 
-            if (!resource) throw new Error('Profesional no encontrado');
+            if (!resource) throw new Error('Recurso no encontrado');
 
-            const dateObj = new Date(`${dateStr}T00:00:00Z`); 
-            const dayOfWeek = dateObj.getUTCDay().toString(); 
+            // Determinar día de la semana (0-6)
+            const dateObj = new Date(`${dateStr}T00:00:00`); 
+            const dayOfWeek = dateObj.getDay().toString(); 
             
             const rules = resource.availability_rules as Record<string, {start: string, end: string}[]>;
             const dayRanges = rules?.[dayOfWeek];
@@ -50,9 +49,9 @@ export const bookingService = {
                 return []; 
             }
 
-            // 3. Turnos ya ocupados en ese día
-            const startOfDay = new Date(`${dateStr}T00:00:00-03:00`); 
-            const endOfDay = new Date(`${dateStr}T23:59:59-03:00`);
+            // 3. Turnos ya ocupados (excluyendo cancelados)
+            const startOfDay = `${dateStr}T00:00:00Z`;
+            const endOfDay = `${dateStr}T23:59:59Z`;
 
             const { data: appointments } = await supabase
                 .from('appointments')
@@ -60,22 +59,21 @@ export const bookingService = {
                 .eq('organization_id', orgId)
                 .eq('resource_id', resourceId)
                 .neq('status', 'cancelled')
-                .gte('start_time', startOfDay.toISOString())
-                .lt('start_time', endOfDay.toISOString());
+                .gte('start_time', startOfDay)
+                .lt('start_time', endOfDay);
 
             const bookedBlocks = (appointments || []).map(app => {
                 const start = new Date(app.start_time);
                 const end = new Date(app.end_time);
                 return {
-                    startMin: start.getHours() * 60 + start.getMinutes(),
-                    endMin: end.getHours() * 60 + end.getMinutes()
+                    startMin: start.getUTCHours() * 60 + start.getUTCMinutes(),
+                    endMin: end.getUTCHours() * 60 + end.getUTCMinutes()
                 };
             });
 
-            // 4. Generar huecos.
-            // EL CAMBIO ESTÁ AQUÍ: El 'step' ahora es igual a la 'duration' del servicio.
+            // 4. Generar slots disponibles
             const availableSlots: string[] = [];
-            const step = duration; 
+            const step = duration; // El intervalo entre turnos es la duración del servicio
 
             for (const range of dayRanges) {
                 if (!range.start || !range.end) continue;
@@ -87,7 +85,6 @@ export const bookingService = {
                     const slotStart = currentMin;
                     const slotEnd = currentMin + duration;
 
-                    // ¿Choca con algún turno ocupado?
                     const hasOverlap = bookedBlocks.some(block => {
                         return slotStart < block.endMin && slotEnd > block.startMin;
                     });
@@ -98,11 +95,10 @@ export const bookingService = {
                 }
             }
 
-            // Eliminar duplicados y ordenar
             return [...new Set(availableSlots)].sort();
 
         } catch (error) {
-            console.error('Error calculando turnos:', error);
+            console.error('Error al calcular disponibilidad:', error);
             return [];
         }
     }

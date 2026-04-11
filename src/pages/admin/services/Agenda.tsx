@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import NewAppointmentModal from './NewAppointmentModal';
 import CheckoutModal from './CheckoutModal'; 
 
+// Diccionario de colores y textos para los estados del turno
 const statusConfig: Record<string, { label: string, color: string, icon: any }> = {
     pending: { label: 'En Espera', color: 'text-amber-600 bg-amber-50 border-amber-200', icon: AlertCircle },
     confirmed: { label: 'Reservado', color: 'text-blue-600 bg-blue-50 border-blue-200', icon: Clock },
@@ -22,16 +23,22 @@ export default function Agenda() {
     const { orgData } = useAuthStore();
     const [loading, setLoading] = useState(true);
     
+    // Controles de Modales
     const [isNewModalOpen, setIsNewModalOpen] = useState(false);
     const [selectedAppointmentForCheckout, setSelectedAppointmentForCheckout] = useState<any>(null);
     
+    // Datos y Filtros
     const [appointments, setAppointments] = useState<any[]>([]);
     const [resources, setResources] = useState<any[]>([]); 
-    
     const [currentDate, setCurrentDate] = useState(new Date());
     const [activeStatusFilter, setActiveStatusFilter] = useState<string>('all');
     const [activeResourceFilter, setActiveResourceFilter] = useState<string>('all');
 
+    // =========================================================================
+    // INICIALIZACIÓN
+    // =========================================================================
+    
+    // 1. Cargar lista de profesionales/canchas para el filtro superior
     useEffect(() => {
         if (orgData?.id) {
             supabase
@@ -43,6 +50,7 @@ export default function Agenda() {
         }
     }, [orgData?.id]);
 
+    // 2. Cargar turnos cada vez que cambia el día seleccionado
     useEffect(() => {
         if (orgData?.id) fetchAgenda();
     }, [orgData?.id, currentDate]);
@@ -50,8 +58,11 @@ export default function Agenda() {
     async function fetchAgenda() {
         try {
             setLoading(true);
+            
+            // Delimitamos exactamente el inicio y fin del día actual (Horario Local)
             const startOfDay = new Date(currentDate);
             startOfDay.setHours(0, 0, 0, 0);
+            
             const endOfDay = new Date(currentDate);
             endOfDay.setHours(23, 59, 59, 999);
 
@@ -85,30 +96,42 @@ export default function Agenda() {
         }
     }
 
+    // =========================================================================
+    // HANDLERS (Interacciones)
+    // =========================================================================
+    
     const changeDay = (days: number) => {
         const newDate = new Date(currentDate);
         newDate.setDate(newDate.getDate() + days);
         setCurrentDate(newDate);
     };
+    
     const goToday = () => setCurrentDate(new Date());
 
     const handleStatusChange = async (appointmentId: string, newStatus: string) => {
         try {
+            // Optimistic UI: Cambiamos en pantalla antes de que vuelva el server
             setAppointments(prev => prev.map(app => 
                 app.id === appointmentId ? { ...app, status: newStatus } : app
             ));
+            
             const { error } = await supabase
                 .from('appointments')
                 .update({ status: newStatus })
-                .eq('id', appointmentId);
+                .eq('id', appointmentId)
+                .eq('organization_id', orgData.id); // Blindaje de seguridad
+                
             if (error) throw error;
             toast.success('Estado actualizado');
         } catch (error) {
             toast.error('Error al cambiar el estado');
-            fetchAgenda();
+            fetchAgenda(); // Rollback en caso de error
         }
     };
 
+    // =========================================================================
+    // HELPERS VISUALES
+    // =========================================================================
     const formatTime = (isoString: string) => new Date(isoString).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
     const getWhatsAppLink = (phone: string) => `https://wa.me/${phone.replace(/\D/g, '')}`;
 
@@ -125,36 +148,47 @@ export default function Agenda() {
         }))
     ];
 
+    // =========================================================================
+    // RENDER PRINCIPAL
+    // =========================================================================
     return (
         <div className="max-w-6xl mx-auto space-y-6 pb-12 animate-in fade-in duration-500">
             
             {/* CABECERA Y NAVEGACIÓN DE FECHA */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 sm:p-5 rounded-[2rem] shadow-sm border border-slate-100">
                 <div className="flex items-center gap-4">
-                    <div className="p-3.5 bg-brand-50 text-brand-600 rounded-2xl border border-brand-100 hidden sm:block"><CalendarIcon className="w-6 h-6" /></div>
+                    <div className="p-3.5 bg-brand-50 text-brand-600 rounded-2xl border border-brand-100 hidden sm:block">
+                        <CalendarIcon className="w-6 h-6" />
+                    </div>
                     <div>
-                        <h1 className="text-xl sm:text-2xl font-black text-slate-800 capitalize tracking-tight">{currentDate.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })}</h1>
-                        <p className="text-xs font-bold text-slate-400 mt-1 uppercase tracking-widest">{appointments.length} turnos agendados hoy</p>
+                        <h1 className="text-xl sm:text-2xl font-black text-slate-800 capitalize tracking-tight">
+                            {currentDate.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })}
+                        </h1>
+                        <p className="text-xs font-bold text-slate-400 mt-1 uppercase tracking-widest">
+                            {appointments.length} turnos agendados hoy
+                        </p>
                     </div>
                 </div>
 
                 <div className="flex flex-wrap sm:flex-nowrap items-center gap-3 w-full md:w-auto">
-                    <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl p-1.5 w-full sm:w-auto order-2 sm:order-1">
-                        <button onClick={() => changeDay(-1)} className="p-2 hover:bg-white hover:shadow-sm rounded-lg transition-all active:scale-95"><ChevronLeft className="w-5 h-5 text-slate-600" /></button>
-                        <button onClick={goToday} className="px-4 py-2 text-sm font-black text-slate-600 hover:bg-white hover:shadow-sm rounded-lg transition-all active:scale-95 mx-1 uppercase tracking-wider">Hoy</button>
-                        <button onClick={() => changeDay(1)} className="p-2 hover:bg-white hover:shadow-sm rounded-lg transition-all active:scale-95"><ChevronRight className="w-5 h-5 text-slate-600" /></button>
+                    {/* Control de Días */}
+                    <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl p-1.5 w-full sm:w-auto order-2 sm:order-1 justify-between sm:justify-start">
+                        <button onClick={() => changeDay(-1)} className="p-2 hover:bg-white hover:shadow-sm rounded-lg transition-all active:scale-95 text-slate-600 focus:outline-none focus:ring-2 focus:ring-brand-500/20"><ChevronLeft className="w-5 h-5" /></button>
+                        <button onClick={goToday} className="px-4 py-2 text-sm font-black text-slate-600 hover:bg-white hover:shadow-sm rounded-lg transition-all active:scale-95 mx-1 uppercase tracking-wider focus:outline-none focus:ring-2 focus:ring-brand-500/20">Hoy</button>
+                        <button onClick={() => changeDay(1)} className="p-2 hover:bg-white hover:shadow-sm rounded-lg transition-all active:scale-95 text-slate-600 focus:outline-none focus:ring-2 focus:ring-brand-500/20"><ChevronRight className="w-5 h-5" /></button>
                     </div>
+                    {/* Botón Nuevo Turno */}
                     <button onClick={() => setIsNewModalOpen(true)} className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-6 py-3.5 rounded-xl font-bold shadow-lg shadow-slate-900/20 transition-all active:scale-95 order-1 sm:order-2 text-sm">
                         <Plus className="w-5 h-5" /> Nuevo Turno
                     </button>
                 </div>
             </div>
 
-            {/* BARRA DE FILTROS */}
+            {/* BARRA DE FILTROS (Estados y Profesionales) */}
             <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 bg-white p-3 rounded-2xl shadow-sm border border-slate-100">
                 <div className="flex overflow-x-auto w-full lg:w-auto hide-scrollbar gap-2 px-1">
                     {statusTabs.map(tab => (
-                        <button key={tab.id} onClick={() => setActiveStatusFilter(tab.id)} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold whitespace-nowrap transition-all ${activeStatusFilter === tab.id ? 'bg-slate-800 text-white shadow-md' : 'bg-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-800'}`}>
+                        <button key={tab.id} onClick={() => setActiveStatusFilter(tab.id)} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold whitespace-nowrap transition-all focus:outline-none focus:ring-2 focus:ring-brand-500/20 ${activeStatusFilter === tab.id ? 'bg-slate-800 text-white shadow-md' : 'bg-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-800'}`}>
                             {tab.label} <span className={`px-2 py-0.5 rounded-md text-[10px] font-black ${activeStatusFilter === tab.id ? 'bg-slate-600 text-white' : 'bg-slate-100 text-slate-400'}`}>{tab.count}</span>
                         </button>
                     ))}
@@ -168,15 +202,17 @@ export default function Agenda() {
                 </div>
             </div>
 
-            {/* LISTA DE TURNOS */}
+            {/* ========================================================================= */}
+            {/* LISTA DE TURNOS (FEED) */}
+            {/* ========================================================================= */}
             <div className="space-y-4">
                 {loading ? (
-                    <div className="py-24 flex flex-col items-center justify-center text-slate-400 bg-white rounded-[2rem] border border-slate-100 shadow-sm gap-4">
+                    <div className="py-24 flex flex-col items-center justify-center text-slate-400 bg-white rounded-[2rem] border border-slate-100 shadow-sm gap-4 animate-in fade-in">
                         <Loader2 className="w-10 h-10 animate-spin text-brand-500" />
-                        <p className="font-bold tracking-wide">Cargando agenda...</p>
+                        <p className="font-bold tracking-wide uppercase text-sm">Cargando agenda...</p>
                     </div>
                 ) : filteredAppointments.length === 0 ? (
-                    <div className="py-24 flex flex-col items-center justify-center text-slate-500 bg-white rounded-[2rem] border border-slate-100 shadow-sm px-4 text-center">
+                    <div className="py-24 flex flex-col items-center justify-center text-slate-500 bg-white rounded-[2rem] border border-slate-100 shadow-sm px-4 text-center animate-in fade-in zoom-in-95">
                         <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-6 border border-slate-100">
                             <CalendarIcon className="w-10 h-10 text-slate-300" />
                         </div>
@@ -192,7 +228,7 @@ export default function Agenda() {
                         return (
                             <div key={app.id} className="bg-white p-5 md:p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md hover:border-slate-200 transition-all flex flex-col md:flex-row md:items-center gap-5 group animate-in fade-in slide-in-from-bottom-4" style={{ animationDelay: `${index * 50}ms` }}>
                                 
-                                {/* Hora y Estado */}
+                                {/* 1. Hora y Estado */}
                                 <div className="flex flex-row md:flex-col items-center md:items-start gap-4 w-full md:w-36 shrink-0 border-b md:border-b-0 md:border-r border-slate-100 pb-4 md:pb-0">
                                     <div className="text-2xl md:text-3xl font-black text-slate-800 tracking-tight">{formatTime(app.start_time)}</div>
                                     <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] uppercase tracking-widest font-black border shadow-sm ${status.color}`}>
@@ -200,19 +236,19 @@ export default function Agenda() {
                                     </div>
                                 </div>
 
-                                {/* Info del Cliente */}
+                                {/* 2. Info del Cliente */}
                                 <div className="flex-1 min-w-0 flex flex-col justify-center">
                                     <h3 className="text-lg font-black text-slate-800 flex items-center gap-2 truncate mb-1.5">
-                                        <User className="w-4 h-4 text-brand-500 shrink-0" /> {app.crm_people?.full_name || 'Cliente sin registrar'}
+                                        <User className="w-4 h-4 text-brand-500 shrink-0" /> {app.crm_people?.full_name || 'Cliente Ocasional'}
                                     </h3>
                                     {app.crm_people?.phone && (
-                                        <a href={getWhatsAppLink(app.crm_people.phone)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-sm font-bold text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded-lg w-fit transition-colors border border-emerald-100">
+                                        <a href={getWhatsAppLink(app.crm_people.phone)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-sm font-bold text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded-lg w-fit transition-colors border border-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/20">
                                             <MessageCircle className="w-4 h-4" /> Enviar WhatsApp
                                         </a>
                                     )}
                                 </div>
 
-                                {/* Servicio y Recurso */}
+                                {/* 3. Servicio y Recurso Asignado */}
                                 <div className="flex-1 min-w-0 bg-slate-50 p-4 rounded-2xl border border-slate-100/50">
                                     <div className="flex justify-between items-start mb-2">
                                         <p className="font-bold text-slate-800 text-sm truncate pr-2">{app.catalog_items?.name || 'Servicio general'}</p>
@@ -225,7 +261,7 @@ export default function Agenda() {
                                     </p>
                                 </div>
 
-                                {/* Acciones (Estado y Cobro) */}
+                                {/* 4. Acciones (Cambiar Estado y Cobrar) */}
                                 <div className="shrink-0 w-full md:w-48 mt-2 md:mt-0 flex flex-col gap-2.5 border-t md:border-t-0 border-slate-100 pt-4 md:pt-0">
                                     <select 
                                         value={app.status || 'pending'}
@@ -239,10 +275,11 @@ export default function Agenda() {
                                         <option value="cancelled">Cancelar Turno</option>
                                     </select>
 
+                                    {/* Botón de Cobro Inteligente (Se oculta si ya se pagó o si se canceló) */}
                                     {!isPaid && app.status !== 'cancelled' && app.status !== 'no_show' ? (
                                         <button 
                                             onClick={() => setSelectedAppointmentForCheckout(app)}
-                                            className="w-full px-4 py-3 bg-brand-600 hover:bg-brand-500 text-white text-xs uppercase tracking-widest font-black rounded-xl transition-all shadow-lg shadow-brand-500/20 flex items-center justify-center gap-1.5 active:scale-95"
+                                            className="w-full px-4 py-3 bg-brand-600 hover:bg-brand-500 text-white text-xs uppercase tracking-widest font-black rounded-xl transition-all shadow-lg shadow-brand-500/20 flex items-center justify-center gap-1.5 active:scale-95 focus:outline-none focus:ring-4 focus:ring-brand-500/30"
                                         >
                                             <DollarSign className="w-4 h-4" /> Cobrar Turno
                                         </button>
@@ -259,6 +296,7 @@ export default function Agenda() {
                 )}
             </div>
 
+            {/* MODALES AUXILIARES */}
             <NewAppointmentModal isOpen={isNewModalOpen} onClose={() => setIsNewModalOpen(false)} onSuccess={() => { setIsNewModalOpen(false); fetchAgenda(); }} />
             <CheckoutModal isOpen={!!selectedAppointmentForCheckout} onClose={() => setSelectedAppointmentForCheckout(null)} appointment={selectedAppointmentForCheckout} onSuccess={() => { setSelectedAppointmentForCheckout(null); fetchAgenda(); }} />
         </div>
