@@ -24,10 +24,11 @@ export default function SuperAdminPromotions() {
     const [newPlanPrice, setNewPlanPrice] = useState('');
 
     // --- ESTADO DEL FORMULARIO DE PROMOS ---
+    // FIX: value y max_uses inicializados en 0 o vacíos pero como string para el input
     const [formData, setFormData] = useState({
         code: '', 
         description: '', 
-        type: 'percentage', 
+        type: 'percentage', // Solo 'percentage' o 'fixed' según DB
         value: '', 
         max_uses: '', 
         expires_at: '', 
@@ -97,13 +98,26 @@ export default function SuperAdminPromotions() {
         setIsSaving(true);
 
         try {
+            // FIX: Limpieza de datos estricta antes de mandar a BD
             const cleanCode = formData.code.toUpperCase().replace(/\s+/g, '');
             const val = Number(formData.value);
             const maxUses = formData.max_uses ? Number(formData.max_uses) : null;
-            const expires = formData.expires_at ? new Date(formData.expires_at).toISOString() : null;
+            
+            // Corrección de fecha: asegurar formato ISO si existe
+            let expires = null;
+            if (formData.expires_at) {
+                // Agregamos tiempo al final del día para que expire al terminar ese día
+                const d = new Date(formData.expires_at);
+                d.setHours(23, 59, 59, 999);
+                expires = d.toISOString();
+            }
 
+            // Validaciones locales antes de chocar con Supabase
             if (!cleanCode) throw new Error('El código es obligatorio');
-            if (val <= 0) throw new Error('El valor debe ser mayor a 0');
+            if (isNaN(val) || val <= 0) throw new Error('El valor debe ser mayor a 0');
+            if (formData.type !== 'percentage' && formData.type !== 'fixed') {
+                throw new Error('El tipo de promoción es inválido');
+            }
 
             const { error } = await supabase.from('promotions').insert([{
                 code: cleanCode,
@@ -115,10 +129,15 @@ export default function SuperAdminPromotions() {
                 is_public: formData.is_public
             }]);
 
-            if (error) throw error;
+            if (error) {
+                // Manejo de error de código duplicado
+                if (error.code === '23505') throw new Error('Ese código de promoción ya existe');
+                throw error;
+            }
 
             toast.success('¡Campaña activada correctamente!');
             setIsCreateModalOpen(false);
+            // Reset state
             setFormData({ code: '', description: '', type: 'percentage', value: '', max_uses: '', expires_at: '', is_public: false });
             fetchData();
         } catch (error: any) {
@@ -158,7 +177,6 @@ export default function SuperAdminPromotions() {
     const formatValue = (type: string, value: number) => {
         if (type === 'percentage') return `${value}% OFF`;
         if (type === 'fixed') return `$${value.toLocaleString()} ARS`;
-        if (type === 'free_months') return `${value} ${value === 1 ? 'Mes Gratis' : 'Meses Gratis'}`;
         return value;
     };
 
@@ -333,6 +351,12 @@ export default function SuperAdminPromotions() {
                                         </div>
                                     </div>
 
+                                    {/* DESCRIPCIÓN (Opcional pero útil) */}
+                                    <div>
+                                        <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3 ml-1">Descripción / Motivo</label>
+                                        <input type="text" value={formData.description} onChange={(e) => setFormData({...formData, description: e.target.value})} placeholder="Ej: Especial Día de la Madre" className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-5 py-4 text-white font-medium focus:ring-2 focus:ring-brand-500/50 outline-none transition-all" />
+                                    </div>
+
                                     <div>
                                         <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3 ml-1">Código de la Promo *</label>
                                         <input type="text" required value={formData.code} onChange={(e) => setFormData({...formData, code: e.target.value.toUpperCase().replace(/\s/g, '')})} placeholder="Ej: HOTSALE" className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-5 py-5 text-white font-black text-2xl uppercase tracking-[0.2em] focus:ring-2 focus:ring-brand-500/50 outline-none transition-all placeholder:tracking-normal placeholder:font-bold" />
@@ -342,21 +366,21 @@ export default function SuperAdminPromotions() {
                                         <div>
                                             <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3 ml-1">Beneficio</label>
                                             <select value={formData.type} onChange={(e) => setFormData({...formData, type: e.target.value, value: ''})} className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-4 py-4 text-white font-bold focus:ring-2 focus:ring-brand-500/50 outline-none transition-all cursor-pointer">
+                                                {/* FIX: Removido 'free_months' para respetar el Enum de la BD */}
                                                 <option value="percentage">Descuento (%)</option>
                                                 <option value="fixed">Monto Fijo ($)</option>
-                                                <option value="free_months">Meses Gratis</option>
                                             </select>
                                         </div>
                                         <div>
                                             <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3 ml-1">Valor</label>
-                                            <input type="number" required value={formData.value} onChange={(e) => setFormData({...formData, value: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-5 py-4 text-emerald-400 font-black text-xl focus:ring-2 focus:ring-brand-500/50 outline-none transition-all" />
+                                            <input type="number" min="1" required value={formData.value} onChange={(e) => setFormData({...formData, value: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-5 py-4 text-emerald-400 font-black text-xl focus:ring-2 focus:ring-brand-500/50 outline-none transition-all" />
                                         </div>
                                     </div>
 
                                     <div className="grid grid-cols-2 gap-4 bg-slate-950/40 p-5 rounded-2xl border border-slate-800/50">
                                         <div>
                                             <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Cupos Totales</label>
-                                            <input type="number" value={formData.max_uses} onChange={(e) => setFormData({...formData, max_uses: e.target.value})} placeholder="∞" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white outline-none font-bold focus:border-slate-600 transition-all" />
+                                            <input type="number" min="1" value={formData.max_uses} onChange={(e) => setFormData({...formData, max_uses: e.target.value})} placeholder="∞" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white outline-none font-bold focus:border-slate-600 transition-all" />
                                         </div>
                                         <div>
                                             <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Vencimiento</label>
@@ -365,7 +389,7 @@ export default function SuperAdminPromotions() {
                                     </div>
 
                                     <div className="pt-4 flex flex-col gap-3">
-                                        <button type="submit" disabled={isSaving} className="w-full py-5 rounded-2xl font-black text-xl text-white bg-brand-600 hover:bg-brand-500 transition-all shadow-xl shadow-brand-500/20 flex justify-center items-center gap-3 active:scale-95 disabled:opacity-50">
+                                        <button type="submit" disabled={isSaving || !formData.code || !formData.value} className="w-full py-5 rounded-2xl font-black text-xl text-white bg-brand-600 hover:bg-brand-500 transition-all shadow-xl shadow-brand-500/20 flex justify-center items-center gap-3 active:scale-95 disabled:opacity-50">
                                             {isSaving ? <Loader2 className="w-6 h-6 animate-spin" /> : <Save className="w-6 h-6" />} Activar Campaña
                                         </button>
                                         <button type="button" onClick={() => setIsCreateModalOpen(false)} className="w-full py-4 text-slate-500 hover:text-white font-bold transition-colors">Cancelar y salir</button>

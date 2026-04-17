@@ -11,7 +11,6 @@ export default function Resources() {
     const [resources, setResources] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     
-    // Controles de Modales
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
     
@@ -19,7 +18,6 @@ export default function Resources() {
     const [isSaving, setIsSaving] = useState(false);
     const [resourceName, setResourceName] = useState('');
 
-    // Textos dinámicos según el rubro (Canchas vs Profesionales)
     const isSports = orgData?.industry === 'sports' || orgData?.industry === 'gym';
     const ui = {
         title: isSports ? 'Canchas y Espacios' : 'Profesionales y Agendas',
@@ -30,14 +28,13 @@ export default function Resources() {
         icon: isSports ? MapPin : User
     };
 
-    // =========================================================================
-    // INICIALIZACIÓN
-    // =========================================================================
     useEffect(() => {
         if (orgData?.id) fetchResources();
     }, [orgData?.id]);
 
     async function fetchResources() {
+        if (!orgData?.id) return; // BLINDAJE DE TYPESCRIPT
+        
         try {
             setLoading(true);
             const { data, error } = await supabase
@@ -56,9 +53,6 @@ export default function Resources() {
         }
     }
 
-    // =========================================================================
-    // HANDLERS (Crear, Editar, Borrar)
-    // =========================================================================
     const handleCreateResource = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!orgData?.id || !resourceName.trim()) return;
@@ -70,9 +64,8 @@ export default function Resources() {
                 .insert([{
                     organization_id: orgData.id,
                     name: resourceName.trim(),
-                    capacity: 1, // Por defecto atiende 1 a 1 (o alquila 1 cancha entera)
+                    capacity: 1, 
                     is_active: true,
-                    // Le creamos un horario base de Lunes a Viernes de 9 a 18 (Se edita luego en ScheduleManager)
                     availability_rules: {
                         '1': [{ start: '09:00', end: '18:00' }],
                         '2': [{ start: '09:00', end: '18:00' }],
@@ -97,25 +90,28 @@ export default function Resources() {
     };
 
     const toggleStatus = async (id: string, currentStatus: boolean) => {
+        if (!orgData?.id) return; // BLINDAJE DE TYPESCRIPT
+        
         try {
-            // Optimistic Update local
             setResources(resources.map(r => r.id === id ? { ...r, is_active: !currentStatus } : r));
             
             const { error } = await supabase
                 .from('resources')
                 .update({ is_active: !currentStatus })
                 .eq('id', id)
-                .eq('organization_id', orgData.id); // Blindaje
+                .eq('organization_id', orgData.id); 
                 
             if (error) throw error;
             toast.success(currentStatus ? "Pausado. Ya no recibirá turnos." : "Activado correctamente.");
         } catch (error) {
             toast.error("Error al cambiar estado");
-            fetchResources(); // Rollback en caso de error
+            fetchResources(); 
         }
     };
 
     const handleDelete = async (id: string, name: string) => {
+        if (!orgData?.id) return; // BLINDAJE DE TYPESCRIPT
+        
         if (!window.confirm(`¿Estás seguro de eliminar a "${name}"? ADVERTENCIA: Se borrarán sus turnos futuros.`)) return;
         
         try {
@@ -123,7 +119,7 @@ export default function Resources() {
                 .from('resources')
                 .delete()
                 .eq('id', id)
-                .eq('organization_id', orgData.id); // Blindaje
+                .eq('organization_id', orgData.id); 
                 
             if (error) throw error;
             
@@ -139,13 +135,9 @@ export default function Resources() {
         setIsScheduleModalOpen(true);
     };
 
-    // =========================================================================
-    // RENDER PRINCIPAL
-    // =========================================================================
     return (
         <div className="pb-12 max-w-6xl mx-auto relative animate-in fade-in duration-500">
             
-            {/* CABECERA */}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
                 <div>
                     <h1 className="text-3xl font-black text-slate-800 tracking-tight flex items-center gap-3">
@@ -162,7 +154,6 @@ export default function Resources() {
                 </button>
             </div>
 
-            {/* GRILLA DE RECURSOS (Tabla en Desktop, Tarjetas en Móvil) */}
             {loading ? (
                 <div className="p-20 flex flex-col items-center justify-center bg-white rounded-3xl border border-slate-100 shadow-sm gap-4">
                     <Loader2 className="w-10 h-10 animate-spin text-brand-500" />
@@ -233,11 +224,6 @@ export default function Resources() {
                 </div>
             )}
 
-            {/* ========================================================================= */}
-            {/* MODALES FLOTANTES */}
-            {/* ========================================================================= */}
-            
-            {/* MODAL 1: CREAR RECURSO NUEVO */}
             <Transition appear show={isModalOpen} as={Fragment}>
                 <Dialog as="div" className="relative z-[99999]" onClose={() => !isSaving && setIsModalOpen(false)}>
                     <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity" />
@@ -283,10 +269,10 @@ export default function Resources() {
                 </Dialog>
             </Transition>
 
-            {/* MODAL 2: CONFIGURAR HORARIOS (ScheduleManager) */}
             <Transition appear show={isScheduleModalOpen} as={Fragment}>
                 <Dialog as="div" className="relative z-[99999]" onClose={() => setIsScheduleModalOpen(false)}>
-                    <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity" />
+                    <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-xl" />
+
                     <div className="fixed inset-0 overflow-y-auto">
                         <div className="flex min-h-full items-center justify-center p-0 md:p-4 text-center">
                             <Dialog.Panel className="w-full md:max-w-4xl transform overflow-hidden rounded-t-3xl md:rounded-3xl bg-white text-left align-middle shadow-2xl transition-all h-[95dvh] md:h-auto md:max-h-[90vh] flex flex-col animate-in slide-in-from-bottom-full md:slide-in-from-bottom-0 md:zoom-in-95">
@@ -306,8 +292,6 @@ export default function Resources() {
                                 
                                 <div className="flex-1 overflow-y-auto bg-slate-50 relative p-4 md:p-6">
                                     {selectedResource && orgData && (
-                                        // IMPORTANTE: ScheduleManager asume que su contenedor tiene espacio. 
-                                        // Le damos un contenedor con bg-white y bordes para que resalte.
                                         <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-2 md:p-6 min-h-full">
                                             <ScheduleManager resourceId={selectedResource.id} orgId={orgData.id} />
                                         </div>

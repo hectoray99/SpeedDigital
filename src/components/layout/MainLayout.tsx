@@ -1,26 +1,49 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Outlet, Link, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
 import {
     LayoutDashboard, Users, ShoppingBag, CreditCard, Settings,
-    LogOut, Menu, X, Building, UtensilsCrossed, Dumbbell, 
+    LogOut, Menu, X, Building, UtensilsCrossed, Dumbbell,
     ExternalLink, Contact, LayoutGrid, ChefHat, Loader2,
-    Wallet, CalendarDays, MapPin
+    Wallet, CalendarDays, MapPin, Sparkles, Activity, Clock,
+    ChevronLeft, ChevronDown, Calculator
 } from 'lucide-react';
 
 export default function MainLayout() {
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+    const [isCollapsed, setIsCollapsed] = useState(() => 
+        localStorage.getItem('sidebar-collapsed') === 'true'
+    );
+
+    // Estado de secciones (abiertas por defecto)
+    const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => {
+        const saved = localStorage.getItem('open-sections');
+        return saved ? JSON.parse(saved) : {
+            Principal: true, Operativo: true, Gestión: true, Equipo: true, Sistema: true
+        };
+    });
+
     const location = useLocation();
     const navigate = useNavigate();
-
     const { user, orgData, userRole, isLoading, signOut } = useAuthStore();
+
+    useEffect(() => {
+        localStorage.setItem('sidebar-collapsed', isCollapsed.toString());
+    }, [isCollapsed]);
+
+    useEffect(() => {
+        localStorage.setItem('open-sections', JSON.stringify(openSections));
+    }, [openSections]);
+
+    const toggleSection = (title: string) => {
+        setOpenSections(prev => ({ ...prev, [title]: !prev[title] }));
+    };
 
     const handleLogout = async () => {
         await signOut();
         navigate('/');
     };
 
-    // 1. Pantalla de Carga Inicial
     if (isLoading) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -29,180 +52,214 @@ export default function MainLayout() {
         );
     }
 
-    // 2. Protecciones de Seguridad
     if (!user) return <Navigate to="/login" replace />;
-    if (!orgData) return null; // El AuthGuard ya se encarga de redirigir al Onboarding si pasa esto
+    if (!orgData) return null;
 
-    // =========================================================================
-    // CONFIGURACIÓN DINÁMICA DEL MENÚ SEGÚN INDUSTRIA
-    // =========================================================================
     const getMenuLabels = (industry: string) => {
         switch (industry) {
-            case 'gym':
-                return { clients: 'Alumnos', items: 'Planes', staff: 'Profesores', icon: Dumbbell, publicLabel: 'Pantalla de Asistencia' };
-            case 'gastronomy':
-                return { clients: 'Comensales', items: 'Menú', staff: 'Mozos/Staff', icon: UtensilsCrossed, publicLabel: 'Menú Digital' };
-            case 'services': 
-                return { clients: 'Clientes/Pacientes', items: 'Servicios', staff: 'Profesionales', icon: CalendarDays, publicLabel: 'Reservar Turno' };
-            case 'sports': 
-                return { clients: 'Clientes', items: 'Servicios', staff: 'Personal', icon: MapPin, publicLabel: 'Reservar Cancha' };
-            case 'accounting':
-                return { clients: 'Clientes', items: 'Servicios', staff: 'Asesores', icon: Users, publicLabel: 'Portal de Clientes' };
-            default:
-                return { clients: 'Personas', items: 'Catálogo', staff: 'Personal', icon: Building, publicLabel: 'Página Pública' };
+            case 'gym': return { clients: 'Alumnos', items: 'Planes', staff: 'Profesores', icon: Dumbbell, publicLabel: 'Pantalla de Asistencia' };
+            case 'gastronomy': return { clients: 'Comensales', items: 'Menú', staff: 'Mozos/Staff', icon: UtensilsCrossed, publicLabel: 'Menú Digital' };
+            case 'services': return { clients: 'Clientes/Pacientes', items: 'Catálogo', staff: 'Profesionales', icon: CalendarDays, publicLabel: 'Reservar Turno' };
+            case 'sports': return { clients: 'Clientes', items: 'Catálogo', staff: 'Personal', icon: MapPin, publicLabel: 'Reservar Cancha' };
+            default: return { clients: 'Personas', items: 'Catálogo', staff: 'Personal', icon: Building, publicLabel: 'Página Pública' };
         }
     };
 
     const labels = getMenuLabels(orgData.industry);
     const isOwnerOrAdmin = userRole === 'owner' || userRole === 'admin';
     const isGastro = orgData.industry === 'gastronomy';
-    const isServices = orgData.industry === 'services' || orgData.industry === 'sports';
-    
-    // Armado del array de rutas permitidas
-    const menuItems = [
-        ...(isOwnerOrAdmin ? [{ icon: LayoutDashboard, label: 'Panel Principal', path: '/admin/dashboard' }] : []),
-        ...(isGastro ? [
+    const isServices = ['services', 'sports', 'gym'].includes(orgData.industry);
+
+    const menuSections = [
+        { title: "Principal", items: isOwnerOrAdmin ? [{ icon: LayoutDashboard, label: 'Panel Principal', path: '/admin/dashboard' }] : [] },
+        { title: "Operativo", items: isServices ? [
+            { icon: Activity, label: 'Monitor Operativo', path: '/admin/master-calendar' },
+            { icon: CalendarDays, label: 'Agenda de Turnos', path: '/admin/agenda' },
+            { icon: MapPin, label: orgData.industry === 'sports' ? 'Canchas / Espacios' : 'Agendas / Recursos', path: '/admin/resources' },
+            { icon: orgData.industry === 'gym' ? Dumbbell : Sparkles, label: orgData.industry === 'gym' ? 'Disciplinas y Clases' : 'Servicios Agendables', path: '/admin/disciplines' }
+        ] : isGastro ? [
             { icon: LayoutGrid, label: 'Salón y Mesas', path: '/admin/salon' },
             { icon: ChefHat, label: 'KDS Cocina', path: '/admin/kitchen' }
-        ] : []),
-        ...(isServices ? [
-            { icon: CalendarDays, label: 'Agenda de Turnos', path: '/admin/agenda' },
-            { icon: MapPin, label: orgData.industry === 'sports' ? 'Canchas / Espacios' : 'Agendas / Recursos', path: '/admin/resources' }
-        ] : []),
-        ...(!isGastro ? [
-            { icon: Users, label: labels.clients, path: '/admin/students' } 
-        ] : []),
-        { icon: ShoppingBag, label: labels.items, path: '/admin/products' },
-        ...(isOwnerOrAdmin ? [
-            { icon: Wallet, label: 'Caja', path: '/admin/caja' },
-            { icon: CreditCard, label: 'Finanzas', path: '/admin/finance' },
+        ] : [] },
+        { title: "Gestión", items: [
+            ...(!isGastro ? [{ icon: Users, label: labels.clients, path: '/admin/clients' }] : []),
+            { icon: ShoppingBag, label: labels.items, path: '/admin/products' },
+            ...(isOwnerOrAdmin ? [
+                { icon: Wallet, label: 'Caja', path: '/admin/caja' },
+                { icon: CreditCard, label: 'Finanzas', path: '/admin/finance' },
+            ] : [])
+        ]},
+        { title: "Equipo", items: isOwnerOrAdmin ? [
             { icon: Contact, label: labels.staff, path: '/admin/staff' },
+            { icon: Calculator, label: 'Liquidación', path: '/admin/payroll' },
+            { icon: CalendarDays, label: 'Reporte de Asistencias', path: '/admin/attendance' },
+            { icon: Clock, label: 'Reloj Fichador', path: '/admin/timeclock' },
+        ] : [] },
+        { title: "Sistema", items: isOwnerOrAdmin ? [
             { icon: Settings, label: 'Configuración', path: '/admin/settings' },
-        ] : []),
+        ] : [] }
     ];
 
-    // =========================================================================
-    // RENDER: ESTRUCTURA DEL LAYOUT PRINCIPAL
-    // =========================================================================
     return (
-        <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row font-sans">
+        <div className="min-h-screen bg-[#F8FAFC] flex flex-col md:flex-row font-sans selection:bg-brand-200 selection:text-brand-900 overflow-x-hidden">
 
-            {/* --- TOPBAR MÓVIL --- */}
-            <div className="md:hidden bg-slate-900 text-white p-4 flex justify-between items-center z-30 sticky top-0 shadow-md">
-                <div className="flex flex-col">
-                    <div className="flex items-center gap-2">
-                        <labels.icon className="w-5 h-5 text-brand-400" />
-                        <span className="font-black text-lg tracking-tight leading-tight">{orgData.name}</span>
-                    </div>
-                    <span className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase w-fit mt-1 tracking-wider ${isOwnerOrAdmin ? 'bg-brand-500/20 text-brand-400' : 'bg-slate-800 text-slate-400'}`}>
-                        {userRole || 'STAFF'}
-                    </span>
-                </div>
-                <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 bg-slate-800 rounded-lg text-slate-300 hover:text-white transition-colors">
-                    <Menu className="w-6 h-6" />
-                </button>
-            </div>
-
-            {/* --- MENÚ MÓVIL DESPLEGABLE (OVERLAY) --- */}
-            {isMobileMenuOpen && (
-                <div className="fixed inset-0 z-[100] md:hidden flex">
-                    <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300" onClick={() => setIsMobileMenuOpen(false)} />
-                    <aside className="relative w-4/5 max-w-sm bg-slate-900 text-white flex flex-col shadow-2xl animate-in slide-in-from-left duration-300 border-r border-slate-800">
-                        
-                        <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-950">
-                            <h1 className="text-xl font-black text-white truncate pr-2 tracking-tight">{orgData.name}</h1>
-                            <button onClick={() => setIsMobileMenuOpen(false)} className="p-2 bg-slate-800 rounded-lg hover:bg-slate-700 transition-colors">
-                                <X className="w-5 h-5 text-slate-400" />
-                            </button>
-                        </div>
-                        
-                        {/* Links del Menú Móvil */}
-                        <nav className="flex-1 p-4 space-y-1.5 overflow-y-auto hide-scrollbar">
-                            {menuItems.map((item) => {
-                                const isActive = location.pathname.startsWith(item.path);
-                                return (
-                                    <Link key={item.path} to={item.path} onClick={() => setIsMobileMenuOpen(false)} className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group ${isActive ? 'bg-brand-500 text-white shadow-md shadow-brand-500/20' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
-                                        <item.icon className={`w-5 h-5 ${isActive ? 'animate-pulse' : ''}`} />
-                                        <span className="font-bold text-sm tracking-wide">{item.label}</span>
-                                    </Link>
-                                );
-                            })}
-
-                            {/* Link a la Pantalla Pública */}
-                            {orgData.slug && (
-                                <div className="pt-4 mt-4 border-t border-slate-800">
-                                    <p className="px-4 text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Público</p>
-                                    <a href={isGastro ? `/m/${orgData.slug}` : `/p/${orgData.slug}`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between px-4 py-3 rounded-xl text-brand-400 hover:bg-brand-500/10 hover:text-brand-300 transition-all duration-200 group border border-brand-500/20">
-                                        <div className="flex items-center gap-3">
-                                            <ExternalLink className="w-5 h-5 group-hover:scale-110 transition-transform" />
-                                            <span className="font-bold text-sm tracking-wide">{labels.publicLabel}</span>
-                                        </div>
-                                    </a>
+            {/* =========================================================
+                SIDEBAR DESKTOP
+                ========================================================= */}
+            <aside className={`hidden md:flex flex-col bg-slate-900 text-slate-300 fixed h-full transition-all duration-300 z-40 shadow-2xl shadow-slate-900/20 ${isCollapsed ? 'w-20' : 'w-[17rem]'}`}>
+                
+                {/* Header del Sidebar (AQUÍ ESTÁ LA MAGIA PARA EVITAR QUE SE ENCIMEN) */}
+                <div className={`h-16 flex items-center border-b border-slate-800 shrink-0 transition-all ${isCollapsed ? 'justify-center px-0' : 'justify-between px-4'}`}>
+                    {isCollapsed ? (
+                        <button 
+                            onClick={() => setIsCollapsed(false)}
+                            className="w-10 h-10 rounded-xl bg-brand-500/10 flex items-center justify-center hover:bg-brand-500/20 transition-colors cursor-pointer"
+                            title="Expandir menú"
+                        >
+                            <labels.icon className="w-5 h-5 text-brand-400" />
+                        </button>
+                    ) : (
+                        <>
+                            <div className="flex items-center gap-3 overflow-hidden">
+                                <div className="w-8 h-8 rounded-xl bg-brand-500/10 flex items-center justify-center shrink-0">
+                                    <labels.icon className="w-5 h-5 text-brand-400" />
                                 </div>
-                            )}
-                        </nav>
-
-                        {/* Footer del Menú Móvil */}
-                        <div className="p-4 border-t border-slate-800 bg-slate-950">
-                            <button onClick={handleLogout} className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white rounded-xl font-bold transition-colors">
-                                <LogOut className="w-5 h-5" /> Cerrar Sesión
+                                <span className="font-black text-white text-lg tracking-tight truncate">{orgData.name}</span>
+                            </div>
+                            <button 
+                                onClick={() => setIsCollapsed(true)} 
+                                className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors"
+                                title="Colapsar menú"
+                            >
+                                <ChevronLeft className="w-4 h-4" />
                             </button>
-                        </div>
-                    </aside>
-                </div>
-            )}
-
-            {/* --- BARRA LATERAL ESCRITORIO --- */}
-            <aside className="hidden md:flex flex-col w-64 bg-slate-900 text-white fixed h-full transition-all duration-300 z-20 border-r border-slate-800">
-                <div className="p-6 border-b border-slate-800 bg-slate-950">
-                    <h1 className="text-xl font-black text-white break-words leading-tight tracking-tight">{orgData.name}</h1>
-                    <div className="flex items-center gap-2 mt-3">
-                        <p className="text-[11px] font-bold text-slate-500 flex items-center gap-1 uppercase tracking-widest">
-                            <labels.icon className="w-3.5 h-3.5" /> {orgData.industry}
-                        </p>
-                    </div>
+                        </>
+                    )}
                 </div>
 
-                {/* Links del Menú Escritorio */}
-                <nav className="flex-1 p-4 space-y-1.5 overflow-y-auto hide-scrollbar">
-                    {menuItems.map((item) => {
-                        const isActive = location.pathname.startsWith(item.path);
+                <nav className="flex-1 overflow-y-auto hide-scrollbar py-4 px-3 space-y-5">
+                    {menuSections.map((section, idx) => {
+                        const filteredItems = section.items.filter(Boolean);
+                        if (filteredItems.length === 0) return null;
+                        const isOpen = openSections[section.title] ?? true;
+
                         return (
-                            <Link key={item.path} to={item.path} className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group ${isActive ? 'bg-brand-500 text-white shadow-md shadow-brand-500/20' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
-                                <item.icon className={`w-5 h-5 ${isActive ? 'animate-pulse' : ''}`} />
-                                <span className="font-bold text-sm tracking-wide">{item.label}</span>
-                            </Link>
+                            <div key={section.title} className="space-y-1">
+                                {!isCollapsed ? (
+                                    <button onClick={() => toggleSection(section.title)} className="flex w-full items-center justify-between px-3 py-1.5 text-[10px] font-black text-slate-500 hover:text-slate-300 uppercase tracking-widest transition-colors group">
+                                        {section.title}
+                                        <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-300 ${isOpen ? 'rotate-180 text-brand-400' : 'opacity-0 group-hover:opacity-100'}`} />
+                                    </button>
+                                ) : (
+                                    <div className={`h-px bg-slate-800 mx-2 my-4 ${idx === 0 ? 'hidden' : 'block'}`} />
+                                )}
+
+                                <div className={`space-y-1 overflow-hidden transition-all duration-300 ${!isOpen && !isCollapsed ? 'max-h-0 opacity-0' : 'max-h-[500px] opacity-100'}`}>
+                                    {filteredItems.map((item: any) => {
+                                        const isActive = location.pathname.startsWith(item.path);
+                                        return (
+                                            <Link key={item.path} to={item.path} className={`flex items-center rounded-xl transition-all duration-200 group relative ${isCollapsed ? 'justify-center py-3' : 'px-3 py-2.5 gap-3'} ${isActive ? 'bg-brand-500/10 text-brand-400 font-bold' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100 font-medium'}`}>
+                                                {isActive && !isCollapsed && <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-1/2 bg-brand-500 rounded-r-full" />}
+                                                <item.icon className={`shrink-0 transition-transform duration-300 ${isCollapsed ? 'w-6 h-6' : 'w-5 h-5'} ${isActive && !isCollapsed ? 'scale-110' : 'group-hover:scale-110'}`} />
+                                                {!isCollapsed && <span className="text-sm tracking-wide truncate">{item.label}</span>}
+                                            </Link>
+                                        );
+                                    })}
+                                </div>
+                            </div>
                         );
                     })}
 
                     {orgData.slug && (
-                        <div className="pt-4 mt-4 border-t border-slate-800">
-                            <p className="px-4 text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Público</p>
-                            <a href={isGastro ? `/m/${orgData.slug}` : `/p/${orgData.slug}`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between px-4 py-3 rounded-xl text-brand-400 hover:bg-brand-500/10 hover:text-brand-300 transition-all duration-200 group border border-brand-500/20">
-                                <div className="flex items-center gap-3">
-                                    <ExternalLink className="w-5 h-5 group-hover:scale-110 transition-transform" />
-                                    <span className="font-bold text-sm tracking-wide">{labels.publicLabel}</span>
-                                </div>
+                        <div className={`pt-4 mt-4 border-t border-slate-800 ${isCollapsed ? 'flex justify-center' : ''}`}>
+                            <a href={isGastro ? `/m/${orgData.slug}` : `/p/${orgData.slug}`} target="_blank" rel="noopener noreferrer" className={`flex items-center rounded-xl text-emerald-400 hover:bg-emerald-400/10 hover:text-emerald-300 transition-colors border border-emerald-400/20 ${isCollapsed ? 'p-3 justify-center' : 'px-3 py-2.5 gap-3'}`} title={isCollapsed ? labels.publicLabel : ''}>
+                                <ExternalLink className={isCollapsed ? 'w-5 h-5' : 'w-4 h-4 shrink-0'} />
+                                {!isCollapsed && <span className="font-bold text-sm truncate">{labels.publicLabel}</span>}
                             </a>
                         </div>
                     )}
                 </nav>
 
-                <div className="p-4 border-t border-slate-800 bg-slate-950">
-                    <button onClick={handleLogout} className="flex items-center gap-3 w-full px-4 py-3 text-slate-400 hover:bg-red-500/10 hover:text-red-400 rounded-xl font-bold transition-colors">
-                        <LogOut className="w-5 h-5" /> Cerrar Sesión
+                <div className="p-3 border-t border-slate-800 shrink-0">
+                    <button onClick={handleLogout} className={`flex items-center rounded-xl text-slate-400 hover:bg-red-500/10 hover:text-red-400 transition-colors w-full ${isCollapsed ? 'p-3 justify-center' : 'px-3 py-2.5 gap-3'}`} title={isCollapsed ? 'Cerrar Sesión' : ''}>
+                        <LogOut className={isCollapsed ? 'w-5 h-5' : 'w-5 h-5 shrink-0'} />
+                        {!isCollapsed && <span className="font-medium text-sm">Cerrar Sesión</span>}
                     </button>
                 </div>
             </aside>
 
-            {/* --- CONTENIDO PRINCIPAL (Acá se inyectan las páginas) --- */}
-            <main className="flex-1 transition-all duration-300 md:ml-64">
-                <div className="p-4 sm:p-6 md:p-8 max-w-7xl mx-auto pb-24 md:pb-8">
-                    {/* Le pasamos orgData a todas las rutas hijas automáticamente */}
+            {/* =========================================================
+                HEADER MOBILE
+                ========================================================= */}
+            <header className="md:hidden bg-white/90 backdrop-blur-md text-slate-800 h-16 w-full flex justify-between items-center px-4 sticky top-0 z-30 border-b border-slate-200 shadow-sm shrink-0">
+                <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-xl bg-brand-50 flex items-center justify-center shrink-0">
+                        <labels.icon className="w-5 h-5 text-brand-600" />
+                    </div>
+                    <span className="font-black text-lg tracking-tight truncate max-w-[200px]">{orgData.name}</span>
+                </div>
+                <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 hover:bg-slate-100 rounded-xl transition-colors active:scale-95 shrink-0">
+                    <Menu className="w-6 h-6 text-slate-600" />
+                </button>
+            </header>
+
+            {/* =========================================================
+                DRAWER MOBILE (Desliza desde la derecha)
+                ========================================================= */}
+            <div className={`md:hidden fixed inset-0 z-[100] transition-opacity duration-300 ${isMobileMenuOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
+                <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsMobileMenuOpen(false)} />
+                
+                <div className={`absolute right-0 top-0 bottom-0 w-[85%] max-w-[320px] bg-slate-900 text-slate-300 flex flex-col transform transition-transform duration-300 ease-in-out shadow-[-20px_0_40px_rgba(0,0,0,0.3)] ${isMobileMenuOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+                    <div className="h-16 border-b border-slate-800 flex items-center justify-between px-5 shrink-0">
+                        <span className="font-black text-white text-lg truncate">{orgData.name}</span>
+                        <button onClick={() => setIsMobileMenuOpen(false)} className="p-2 bg-slate-800 rounded-xl text-slate-400 hover:text-white transition-colors">
+                            <X className="w-5 h-5" />
+                        </button>
+                    </div>
+                    <nav className="flex-1 p-4 overflow-y-auto space-y-6 hide-scrollbar">
+                        {menuSections.map((section) => {
+                            const filteredItems = section.items.filter(Boolean);
+                            if (filteredItems.length === 0) return null;
+                            return (
+                                <div key={section.title} className="space-y-2">
+                                    <p className="px-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">{section.title}</p>
+                                    <div className="space-y-1">
+                                        {filteredItems.map((item: any) => {
+                                            const isActive = location.pathname.startsWith(item.path);
+                                            return (
+                                                <Link key={item.path} to={item.path} onClick={() => setIsMobileMenuOpen(false)} className={`flex items-center gap-4 px-4 py-3.5 rounded-2xl transition-all font-medium ${isActive ? 'bg-brand-500/10 text-brand-400 font-bold' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}>
+                                                    <item.icon className="w-5 h-5 shrink-0" />
+                                                    <span>{item.label}</span>
+                                                </Link>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </nav>
+                    <div className="p-4 border-t border-slate-800 space-y-2 shrink-0">
+                        {orgData.slug && (
+                            <a href={isGastro ? `/m/${orgData.slug}` : `/p/${orgData.slug}`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-2 w-full py-3.5 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500 hover:text-white rounded-2xl font-bold transition-all">
+                                <ExternalLink className="w-5 h-5" /> {labels.publicLabel}
+                            </a>
+                        )}
+                        <button onClick={handleLogout} className="flex items-center justify-center gap-2 w-full py-3.5 bg-slate-800 text-slate-300 hover:bg-red-500 hover:text-white rounded-2xl font-bold transition-all">
+                            <LogOut className="w-5 h-5" /> Cerrar Sesión
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {/* =========================================================
+                ÁREA DE CONTENIDO PRINCIPAL
+                ========================================================= */}
+            <main className={`flex-1 flex flex-col min-w-0 w-full transition-all duration-300 ease-in-out ${isCollapsed ? 'md:ml-20' : 'md:ml-[17rem]'}`}>
+                <div className="flex-1 w-full max-w-[1600px] mx-auto p-4 sm:p-6 md:p-8 lg:p-10">
                     <Outlet context={{ orgData }} />
                 </div>
             </main>
-            
+
         </div>
     );
 }

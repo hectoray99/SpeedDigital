@@ -2,10 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Estilos base de la APP (Fondo oscuro, texto claro) */
-body {
-  @apply bg-slate-900 text-slate-50;
-}
 
 /* --- CORRECCIÓN GLOBAL DE FORMULARIOS --- */
 /* Forzamos a que todos los inputs y selects sean legibles siempre */

@@ -21,9 +21,10 @@ export default function DebtorsListModal({ isOpen, onClose }: Props) {
     }, [isOpen, orgData?.id]);
 
     async function fetchDebtors() {
+        if (!orgData?.id) return; // BLINDAJE DE TYPESCRIPT
+        
         setLoading(true);
         try {
-            // Buscamos operaciones con saldo pendiente, asegurando filtrar por la ORG actual
             const { data, error } = await supabase
                 .from('operations')
                 .select(`
@@ -34,10 +35,10 @@ export default function DebtorsListModal({ isOpen, onClose }: Props) {
                     created_at,
                     crm_people (id, full_name, identifier)
                 `)
-                .eq('organization_id', orgData.id) // BLINDAJE DE SEGURIDAD (Multi-tenant)
-                .gt('balance', 0) // Tiene deuda
+                .eq('organization_id', orgData.id) 
+                .gt('balance', 0) 
                 .neq('status', 'cancelled')
-                .order('created_at', { ascending: true }); // Las más viejas primero
+                .order('created_at', { ascending: true }); 
 
             if (error) throw error;
             setDebtors(data || []);
@@ -57,7 +58,6 @@ export default function DebtorsListModal({ isOpen, onClose }: Props) {
                     <div className="flex min-h-full items-center justify-center p-4 text-center">
                         <Dialog.Panel className="w-full max-w-2xl h-[85vh] md:h-[80vh] transform overflow-hidden rounded-3xl bg-white text-left align-middle shadow-2xl transition-all flex flex-col animate-in zoom-in-95 duration-200">
                             
-                            {/* HEADER */}
                             <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
                                 <Dialog.Title as="h3" className="text-xl font-black text-slate-800 flex items-center gap-2">
                                     <div className="p-2 bg-red-100 rounded-xl"><AlertCircle className="w-5 h-5 text-red-600" /></div>
@@ -68,7 +68,6 @@ export default function DebtorsListModal({ isOpen, onClose }: Props) {
                                 </button>
                             </div>
 
-                            {/* BODY (Scrolleable) */}
                             <div className="flex-1 overflow-y-auto p-4 md:p-6 bg-slate-50/50">
                                 {loading ? (
                                     <div className="h-full flex flex-col items-center justify-center text-slate-400 opacity-60">
@@ -113,7 +112,7 @@ export default function DebtorsListModal({ isOpen, onClose }: Props) {
                                                         {person.id && (
                                                             <button
                                                                 onClick={() => {
-                                                                    onClose(); // Cerramos modal antes de navegar
+                                                                    onClose(); 
                                                                     navigate(`/admin/students/${person.id}`);
                                                                 }}
                                                                 className="p-3 md:px-4 md:py-3 bg-slate-900 text-white rounded-xl hover:bg-black hover:shadow-lg hover:shadow-slate-900/20 transition-all font-bold text-sm flex items-center gap-2 active:scale-95"

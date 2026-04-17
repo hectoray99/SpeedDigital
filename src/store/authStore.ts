@@ -1,10 +1,23 @@
 import { create } from "zustand";
 import { supabase } from "../lib/supabase";
+import type { User } from "@supabase/supabase-js";
+
+export type UserRole = 'owner' | 'admin' | 'staff' | 'viewer' | 'chef_dispatcher' | 'line_cook';
+
+export interface Organization {
+    id: string;
+    name: string;
+    slug: string;
+    industry: string;
+    owner_id: string;
+    [key: string]: any;
+}
 
 interface AuthState {
-    user: any | null;
-    orgData: any | null;
-    userRole: string | null;
+    user: User | null;
+    orgData: Organization | null;
+    userRole: UserRole | null;
+    isSuperAdmin: boolean;
     isLoading: boolean;
     initializeAuth: () => Promise<void>;
     signOut: () => Promise<void>;
@@ -12,10 +25,9 @@ interface AuthState {
 
 export const useAuthStore = create<AuthState>((set, get) => {
     
-    // Listener de sesión global
     supabase.auth.onAuthStateChange((event, session) => {
         if (event === 'SIGNED_OUT' || !session) {
-            set({ user: null, orgData: null, userRole: null, isLoading: false });
+            set({ user: null, orgData: null, userRole: null, isSuperAdmin: false, isLoading: false });
         } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
             get().initializeAuth();
         }
@@ -25,6 +37,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
         user: null,
         orgData: null,
         userRole: null,
+        isSuperAdmin: false,
         isLoading: true,
 
         initializeAuth: async () => {
@@ -32,58 +45,49 @@ export const useAuthStore = create<AuthState>((set, get) => {
                 const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
                 if (sessionError || !session) {
-                    set({ user: null, orgData: null, userRole: null, isLoading: false });
+                    set({ user: null, orgData: null, userRole: null, isSuperAdmin: false, isLoading: false });
                     return;
                 }
 
-                // 1. Verificar si es el Dueño
-                let { data: org, error: fetchError } = await supabase
-                    .from("organizations")
-                    .select("*")
-                    .eq("owner_id", session.user.id)
-                    .maybeSingle();
+                const [profileRes, orgOwnerRes, membershipRes] = await Promise.all([
+                    supabase.from("profiles").select("is_superadmin").eq("id", session.user.id).maybeSingle(),
+                    supabase.from("organizations").select("*").eq("owner_id", session.user.id).maybeSingle(),
+                    supabase.from("organization_members").select("organization_id, role").eq("profile_id", session.user.id).maybeSingle()
+                ]);
 
-                let assignedRole = 'owner';
+                const isSuperAdmin = !!profileRes.data?.is_superadmin;
+                let org = orgOwnerRes.data as Organization | null;
+                let assignedRole: UserRole | null = org ? 'owner' : null;
 
-                // 2. Verificar si es Miembro del Staff
-                if (!org) {
-                    const { data: membership } = await supabase
-                        .from("organization_members")
-                        .select("organization_id, role")
-                        .eq("profile_id", session.user.id)
+                if (!org && membershipRes.data?.organization_id) {
+                    const { data: employeeOrg } = await supabase
+                        .from("organizations")
+                        .select("*")
+                        .eq("id", membershipRes.data.organization_id)
                         .maybeSingle();
 
-                    if (membership) {
-                        const { data: employeeOrg } = await supabase
-                            .from("organizations")
-                            .select("*")
-                            .eq("id", membership.organization_id)
-                            .maybeSingle();
-                        
-                        org = employeeOrg;
-                        assignedRole = membership.role; 
-                    }
+                    org = employeeOrg as Organization;
+                    assignedRole = membershipRes.data.role as UserRole;
                 }
-
-                if (fetchError && !org) console.error("Error fetching org:", fetchError);
 
                 set({
                     user: session.user,
                     orgData: org || null,
                     userRole: org ? assignedRole : null,
+                    isSuperAdmin,
                     isLoading: false,
                 });
 
             } catch (error) {
                 console.error("Auth initialization error:", error);
-                set({ user: null, orgData: null, userRole: null, isLoading: false });
+                set({ user: null, orgData: null, userRole: null, isSuperAdmin: false, isLoading: false });
             }
         },
 
         signOut: async () => {
             set({ isLoading: true });
             await supabase.auth.signOut();
-            set({ user: null, orgData: null, userRole: null, isLoading: false });
+            set({ user: null, orgData: null, userRole: null, isSuperAdmin: false, isLoading: false });
         },
     };
 });

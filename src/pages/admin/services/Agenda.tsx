@@ -1,137 +1,161 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Fragment } from 'react';
+import { Dialog, Transition } from '@headlessui/react';
 import { supabase } from '../../../lib/supabase';
 import { useAuthStore } from '../../../store/authStore';
 import { 
     Loader2, ChevronLeft, ChevronRight, Calendar as CalendarIcon, 
-    User, Clock, MessageCircle, CheckCircle2, XCircle, AlertCircle, Filter, Plus, DollarSign
+    MessageCircle, Filter, Plus, Trash2, DollarSign, CheckCircle2,
+    Clock, XCircle, AlertCircle, LayoutGrid, List
 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import NewAppointmentModal from './NewAppointmentModal';
 import CheckoutModal from './CheckoutModal'; 
 
-// Diccionario de colores y textos para los estados del turno
-const statusConfig: Record<string, { label: string, color: string, icon: any }> = {
-    pending: { label: 'En Espera', color: 'text-amber-600 bg-amber-50 border-amber-200', icon: AlertCircle },
-    confirmed: { label: 'Reservado', color: 'text-blue-600 bg-blue-50 border-blue-200', icon: Clock },
-    attended: { label: 'Atendido', color: 'text-emerald-600 bg-emerald-50 border-emerald-200', icon: CheckCircle2 },
-    no_show: { label: 'Ausente', color: 'text-red-600 bg-red-50 border-red-200', icon: XCircle },
-    cancelled: { label: 'Cancelado', color: 'text-slate-500 bg-slate-100 border-slate-300', icon: XCircle }
+const statusConfig: Record<string, { label: string, rowBg: string, borderColor: string, timeColor: string, icon: any }> = {
+    pending: { label: 'En Espera', rowBg: 'bg-[#FFF9E6]', borderColor: 'border-amber-400', timeColor: 'text-amber-600', icon: AlertCircle },
+    confirmed: { label: 'Reservado', rowBg: 'bg-white', borderColor: 'border-slate-200', timeColor: 'text-blue-600', icon: Clock },
+    attended: { label: 'Atendido', rowBg: 'bg-[#F0FDF4]', borderColor: 'border-emerald-400', timeColor: 'text-emerald-600', icon: CheckCircle2 },
+    no_show: { label: 'Ausente', rowBg: 'bg-red-50', borderColor: 'border-red-400', timeColor: 'text-red-600', icon: XCircle },
+    cancelled: { label: 'Cancelado', rowBg: 'bg-slate-50 opacity-60', borderColor: 'border-slate-300', timeColor: 'text-slate-400', icon: XCircle }
 };
+
+function getMonday(d: Date) {
+    const date = new Date(d);
+    const day = date.getDay();
+    const diff = date.getDate() - day + (day === 0 ? -6 : 1);
+    return new Date(date.setDate(diff));
+}
 
 export default function Agenda() {
     const { orgData } = useAuthStore();
     const [loading, setLoading] = useState(true);
+    const [viewMode, setViewMode] = useState<'daily' | 'weekly'>('daily');
     
-    // Controles de Modales
     const [isNewModalOpen, setIsNewModalOpen] = useState(false);
     const [selectedAppointmentForCheckout, setSelectedAppointmentForCheckout] = useState<any>(null);
+    const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+    const [appointmentToDelete, setAppointmentToDelete] = useState<string | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
     
-    // Datos y Filtros
     const [appointments, setAppointments] = useState<any[]>([]);
     const [resources, setResources] = useState<any[]>([]); 
     const [currentDate, setCurrentDate] = useState(new Date());
     const [activeStatusFilter, setActiveStatusFilter] = useState<string>('all');
     const [activeResourceFilter, setActiveResourceFilter] = useState<string>('all');
 
-    // =========================================================================
-    // INICIALIZACIÓN
-    // =========================================================================
-    
-    // 1. Cargar lista de profesionales/canchas para el filtro superior
     useEffect(() => {
-        if (orgData?.id) {
+        const orgId = orgData?.id;
+        if (orgId) {
             supabase
                 .from('resources')
                 .select('id, name')
-                .eq('organization_id', orgData.id)
+                .eq('organization_id', orgId)
                 .eq('is_active', true)
                 .then(({ data }) => setResources(data || []));
         }
     }, [orgData?.id]);
 
-    // 2. Cargar turnos cada vez que cambia el día seleccionado
     useEffect(() => {
         if (orgData?.id) fetchAgenda();
-    }, [orgData?.id, currentDate]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [orgData?.id, currentDate, viewMode]);
 
     async function fetchAgenda() {
+        const orgId = orgData?.id;
+        if (!orgId) return;
+
         try {
             setLoading(true);
             
-            // Delimitamos exactamente el inicio y fin del día actual (Horario Local)
-            const startOfDay = new Date(currentDate);
-            startOfDay.setHours(0, 0, 0, 0);
-            
-            const endOfDay = new Date(currentDate);
-            endOfDay.setHours(23, 59, 59, 999);
+            let startOfDay = new Date(currentDate);
+            let endOfDay = new Date(currentDate);
+
+            if (viewMode === 'weekly') {
+                const mon = getMonday(currentDate);
+                startOfDay = new Date(mon);
+                startOfDay.setHours(0, 0, 0, 0);
+
+                endOfDay = new Date(mon);
+                endOfDay.setDate(mon.getDate() + 5); 
+                endOfDay.setHours(23, 59, 59, 999);
+            } else {
+                startOfDay.setHours(0, 0, 0, 0);
+                endOfDay.setHours(23, 59, 59, 999);
+            }
 
             const { data, error } = await supabase
                 .from('appointments')
                 .select(`
-                    id, 
-                    start_time, 
-                    end_time, 
-                    status,
-                    resource_id,
-                    person_id,
-                    operation_id,
+                    id, start_time, end_time, status, resource_id, person_id, operation_id, created_at,
                     crm_people ( full_name, phone ),
                     catalog_items ( id, name, duration_minutes, price ),
                     resources ( name )
                 `)
-                .eq('organization_id', orgData.id)
+                .eq('organization_id', orgId)
                 .gte('start_time', startOfDay.toISOString())
                 .lt('start_time', endOfDay.toISOString())
                 .order('start_time', { ascending: true });
 
             if (error) throw error;
             setAppointments(data || []);
-
         } catch (error) {
-            console.error('Error cargando agenda:', error);
-            toast.error('No se pudo cargar la agenda del día');
+            toast.error('Error al cargar la agenda');
         } finally {
             setLoading(false);
         }
     }
 
-    // =========================================================================
-    // HANDLERS (Interacciones)
-    // =========================================================================
-    
-    const changeDay = (days: number) => {
+    const navigateDate = (direction: number) => {
         const newDate = new Date(currentDate);
-        newDate.setDate(newDate.getDate() + days);
+        if (viewMode === 'weekly') {
+            newDate.setDate(newDate.getDate() + (direction * 7));
+        } else {
+            newDate.setDate(newDate.getDate() + direction);
+        }
         setCurrentDate(newDate);
     };
-    
-    const goToday = () => setCurrentDate(new Date());
 
-    const handleStatusChange = async (appointmentId: string, newStatus: string) => {
+    const promptDeleteAppointment = (id: string) => {
+        setAppointmentToDelete(id);
+        setDeleteModalOpen(true);
+    };
+
+    const confirmDeleteAppointment = async () => {
+        const orgId = orgData?.id;
+        if (!orgId || !appointmentToDelete) return;
+
+        setIsDeleting(true);
         try {
-            // Optimistic UI: Cambiamos en pantalla antes de que vuelva el server
-            setAppointments(prev => prev.map(app => 
-                app.id === appointmentId ? { ...app, status: newStatus } : app
-            ));
-            
-            const { error } = await supabase
-                .from('appointments')
-                .update({ status: newStatus })
-                .eq('id', appointmentId)
-                .eq('organization_id', orgData.id); // Blindaje de seguridad
-                
+            setAppointments(prev => prev.filter(app => app.id !== appointmentToDelete));
+            const { error } = await supabase.from('appointments').delete().eq('id', appointmentToDelete).eq('organization_id', orgId);
             if (error) throw error;
-            toast.success('Estado actualizado');
+            toast.success('Turno eliminado correctamente');
         } catch (error) {
-            toast.error('Error al cambiar el estado');
-            fetchAgenda(); // Rollback en caso de error
+            toast.error('No se pudo eliminar el turno');
+            fetchAgenda(); 
+        } finally {
+            setIsDeleting(false);
+            setDeleteModalOpen(false);
+            setAppointmentToDelete(null);
         }
     };
 
-    // =========================================================================
-    // HELPERS VISUALES
-    // =========================================================================
+    const handleStatusChange = async (appointmentId: string, newStatus: string) => {
+        const orgId = orgData?.id;
+        if (!orgId) return;
+
+        try {
+            setAppointments(prev => prev.map(app => app.id === appointmentId ? { ...app, status: newStatus } : app));
+            const { error } = await supabase.from('appointments').update({ status: newStatus }).eq('id', appointmentId).eq('organization_id', orgId);
+            if (error) throw error;
+            toast.success('Estado actualizado');
+        } catch (error) {
+            toast.error('Error al actualizar estado');
+            fetchAgenda(); 
+        }
+    };
+
     const formatTime = (isoString: string) => new Date(isoString).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
     const getWhatsAppLink = (phone: string) => `https://wa.me/${phone.replace(/\D/g, '')}`;
 
@@ -148,157 +172,257 @@ export default function Agenda() {
         }))
     ];
 
-    // =========================================================================
-    // RENDER PRINCIPAL
-    // =========================================================================
-    return (
-        <div className="max-w-6xl mx-auto space-y-6 pb-12 animate-in fade-in duration-500">
-            
-            {/* CABECERA Y NAVEGACIÓN DE FECHA */}
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 sm:p-5 rounded-[2rem] shadow-sm border border-slate-100">
-                <div className="flex items-center gap-4">
-                    <div className="p-3.5 bg-brand-50 text-brand-600 rounded-2xl border border-brand-100 hidden sm:block">
-                        <CalendarIcon className="w-6 h-6" />
-                    </div>
-                    <div>
-                        <h1 className="text-xl sm:text-2xl font-black text-slate-800 capitalize tracking-tight">
-                            {currentDate.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })}
-                        </h1>
-                        <p className="text-xs font-bold text-slate-400 mt-1 uppercase tracking-widest">
-                            {appointments.length} turnos agendados hoy
-                        </p>
-                    </div>
-                </div>
+    const weekDays = Array.from({ length: 6 }).map((_, i) => {
+        const d = new Date(getMonday(currentDate));
+        d.setDate(d.getDate() + i);
+        return d;
+    });
 
-                <div className="flex flex-wrap sm:flex-nowrap items-center gap-3 w-full md:w-auto">
-                    {/* Control de Días */}
-                    <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl p-1.5 w-full sm:w-auto order-2 sm:order-1 justify-between sm:justify-start">
-                        <button onClick={() => changeDay(-1)} className="p-2 hover:bg-white hover:shadow-sm rounded-lg transition-all active:scale-95 text-slate-600 focus:outline-none focus:ring-2 focus:ring-brand-500/20"><ChevronLeft className="w-5 h-5" /></button>
-                        <button onClick={goToday} className="px-4 py-2 text-sm font-black text-slate-600 hover:bg-white hover:shadow-sm rounded-lg transition-all active:scale-95 mx-1 uppercase tracking-wider focus:outline-none focus:ring-2 focus:ring-brand-500/20">Hoy</button>
-                        <button onClick={() => changeDay(1)} className="p-2 hover:bg-white hover:shadow-sm rounded-lg transition-all active:scale-95 text-slate-600 focus:outline-none focus:ring-2 focus:ring-brand-500/20"><ChevronRight className="w-5 h-5" /></button>
+    const getDayName = (date: Date) => date.toLocaleDateString('es-AR', { weekday: 'long' });
+
+    return (
+        <div className="max-w-screen-2xl mx-auto pb-12 animate-in fade-in duration-500 bg-white min-h-[80vh] shadow-sm">
+            
+            <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 p-6 border-b border-slate-200">
+                <div className="flex items-center gap-4 w-full xl:w-auto">
+                    <button onClick={() => navigateDate(-1)} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><ChevronLeft className="w-5 h-5 text-slate-600" /></button>
+                    <div className="flex flex-col">
+                        <h1 className="text-xl font-black text-slate-800 capitalize flex items-center gap-2">
+                            <CalendarIcon className="w-5 h-5 text-brand-600" />
+                            {viewMode === 'daily' 
+                                ? currentDate.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })
+                                : `Semana del ${weekDays[0].getDate()} al ${weekDays[5].getDate()} de ${weekDays[0].toLocaleDateString('es-AR', { month: 'long' })}`
+                            }
+                        </h1>
                     </div>
-                    {/* Botón Nuevo Turno */}
-                    <button onClick={() => setIsNewModalOpen(true)} className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-6 py-3.5 rounded-xl font-bold shadow-lg shadow-slate-900/20 transition-all active:scale-95 order-1 sm:order-2 text-sm">
-                        <Plus className="w-5 h-5" /> Nuevo Turno
+                    <button onClick={() => navigateDate(1)} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><ChevronRight className="w-5 h-5 text-slate-600" /></button>
+                    <button onClick={() => setCurrentDate(new Date())} className="text-sm font-bold text-slate-500 hover:text-slate-800 transition-colors ml-2 hidden sm:block">Hoy</button>
+                </div>
+                
+                <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto justify-between xl:justify-end">
+                    <div className="flex items-center bg-slate-100 p-1 rounded-lg border border-slate-200 shrink-0">
+                        <button onClick={() => setViewMode('daily')} className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-bold transition-all ${viewMode === 'daily' ? 'bg-white text-brand-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                            <List className="w-4 h-4" /> Día
+                        </button>
+                        <button onClick={() => setViewMode('weekly')} className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-bold transition-all ${viewMode === 'weekly' ? 'bg-white text-brand-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                            <LayoutGrid className="w-4 h-4" /> Semana
+                        </button>
+                    </div>
+
+                    <div className="flex items-center bg-white border border-slate-200 rounded-lg px-3 py-1.5 focus-within:border-brand-400 transition-colors shrink-0">
+                        <Filter className="w-4 h-4 text-slate-400 mr-2" />
+                        <select value={activeResourceFilter} onChange={(e) => setActiveResourceFilter(e.target.value)} className="bg-transparent text-sm font-bold text-slate-600 outline-none cursor-pointer w-full sm:w-auto">
+                            <option value="all">Todos los Profesionales</option>
+                            {resources.map(res => <option key={res.id} value={res.id}>{res.name}</option>)}
+                        </select>
+                    </div>
+
+                    <button onClick={() => setIsNewModalOpen(true)} className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center justify-center gap-2 shadow-sm transition-all active:scale-95 w-full sm:w-auto">
+                        <Plus className="w-4 h-4" /> Nuevo Turno
                     </button>
                 </div>
             </div>
 
-            {/* BARRA DE FILTROS (Estados y Profesionales) */}
-            <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 bg-white p-3 rounded-2xl shadow-sm border border-slate-100">
-                <div className="flex overflow-x-auto w-full lg:w-auto hide-scrollbar gap-2 px-1">
-                    {statusTabs.map(tab => (
-                        <button key={tab.id} onClick={() => setActiveStatusFilter(tab.id)} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold whitespace-nowrap transition-all focus:outline-none focus:ring-2 focus:ring-brand-500/20 ${activeStatusFilter === tab.id ? 'bg-slate-800 text-white shadow-md' : 'bg-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-800'}`}>
-                            {tab.label} <span className={`px-2 py-0.5 rounded-md text-[10px] font-black ${activeStatusFilter === tab.id ? 'bg-slate-600 text-white' : 'bg-slate-100 text-slate-400'}`}>{tab.count}</span>
-                        </button>
-                    ))}
-                </div>
-                <div className="flex items-center w-full lg:w-auto bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 focus-within:ring-2 focus-within:ring-brand-500/20 focus-within:bg-white transition-all mx-1 lg:mx-0">
-                    <Filter className="w-4 h-4 text-brand-500 mr-3 shrink-0" />
-                    <select value={activeResourceFilter} onChange={(e) => setActiveResourceFilter(e.target.value)} className="w-full lg:w-56 bg-transparent text-sm font-bold text-slate-700 outline-none cursor-pointer appearance-none">
-                        <option value="all">Cualquier Profesional / Espacio</option>
-                        {resources.map(res => <option key={res.id} value={res.id}>{res.name}</option>)}
-                    </select>
-                </div>
+            <div className="flex overflow-x-auto border-b border-slate-200 bg-slate-50/50 px-6 hide-scrollbar">
+                {statusTabs.map(tab => (
+                    <button key={tab.id} onClick={() => setActiveStatusFilter(tab.id)} className={`flex items-center gap-2 px-4 py-3 text-sm font-bold border-b-2 transition-all ${activeStatusFilter === tab.id ? 'border-brand-600 text-brand-700 bg-white' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+                        {tab.label} <span className="text-xs opacity-50">({tab.count})</span>
+                    </button>
+                ))}
             </div>
 
-            {/* ========================================================================= */}
-            {/* LISTA DE TURNOS (FEED) */}
-            {/* ========================================================================= */}
-            <div className="space-y-4">
+            <div className="flex flex-col min-h-[500px]">
                 {loading ? (
-                    <div className="py-24 flex flex-col items-center justify-center text-slate-400 bg-white rounded-[2rem] border border-slate-100 shadow-sm gap-4 animate-in fade-in">
-                        <Loader2 className="w-10 h-10 animate-spin text-brand-500" />
-                        <p className="font-bold tracking-wide uppercase text-sm">Cargando agenda...</p>
-                    </div>
-                ) : filteredAppointments.length === 0 ? (
-                    <div className="py-24 flex flex-col items-center justify-center text-slate-500 bg-white rounded-[2rem] border border-slate-100 shadow-sm px-4 text-center animate-in fade-in zoom-in-95">
-                        <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-6 border border-slate-100">
-                            <CalendarIcon className="w-10 h-10 text-slate-300" />
-                        </div>
-                        <p className="text-xl font-black text-slate-700 mb-2">{appointments.length > 0 ? 'Sin resultados para estos filtros' : 'Agenda Libre'}</p>
-                        <p className="text-sm font-medium">{appointments.length > 0 ? 'Probá seleccionando "Todos" o cambiando el profesional.' : 'No hay turnos programados para este día.'}</p>
-                    </div>
+                    <div className="py-32 flex flex-col items-center justify-center text-slate-400 gap-4"><Loader2 className="w-10 h-10 animate-spin text-brand-500" /><p className="text-sm font-bold uppercase tracking-widest">Cargando Agenda...</p></div>
+                ) : filteredAppointments.length === 0 && viewMode === 'daily' ? (
+                    <div className="py-32 text-center text-slate-500"><p className="text-xl font-black text-slate-300">No hay turnos para este día.</p></div>
                 ) : (
-                    filteredAppointments.map((app, index) => {
-                        const status = statusConfig[app.status || 'pending'];
-                        const StatusIcon = status.icon;
-                        const isPaid = !!app.operation_id; 
+                    <>
+                        {viewMode === 'daily' && (
+                            <div className="flex flex-col">
+                                {filteredAppointments.map((app) => {
+                                    const status = statusConfig[app.status || 'pending'];
+                                    const StatusIcon = status.icon;
+                                    const isPaid = !!app.operation_id;
 
-                        return (
-                            <div key={app.id} className="bg-white p-5 md:p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md hover:border-slate-200 transition-all flex flex-col md:flex-row md:items-center gap-5 group animate-in fade-in slide-in-from-bottom-4" style={{ animationDelay: `${index * 50}ms` }}>
-                                
-                                {/* 1. Hora y Estado */}
-                                <div className="flex flex-row md:flex-col items-center md:items-start gap-4 w-full md:w-36 shrink-0 border-b md:border-b-0 md:border-r border-slate-100 pb-4 md:pb-0">
-                                    <div className="text-2xl md:text-3xl font-black text-slate-800 tracking-tight">{formatTime(app.start_time)}</div>
-                                    <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] uppercase tracking-widest font-black border shadow-sm ${status.color}`}>
-                                        <StatusIcon className="w-3.5 h-3.5" />{status.label}
-                                    </div>
-                                </div>
+                                    return (
+                                        <div key={app.id} className={`flex flex-col md:flex-row md:items-center py-4 px-6 border-b border-slate-100 border-l-4 ${status.borderColor} ${status.rowBg} hover:brightness-[0.98] transition-all group gap-4`}>
+                                            <div className="w-32 shrink-0 flex flex-col">
+                                                <div className={`flex items-center gap-1.5 text-lg font-black ${status.timeColor}`}>
+                                                    <StatusIcon className="w-4 h-4 opacity-70" /> {formatTime(app.start_time)}
+                                                </div>
+                                                <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider ml-5.5 mt-0.5">{status.label}</span>
+                                            </div>
 
-                                {/* 2. Info del Cliente */}
-                                <div className="flex-1 min-w-0 flex flex-col justify-center">
-                                    <h3 className="text-lg font-black text-slate-800 flex items-center gap-2 truncate mb-1.5">
-                                        <User className="w-4 h-4 text-brand-500 shrink-0" /> {app.crm_people?.full_name || 'Cliente Ocasional'}
-                                    </h3>
-                                    {app.crm_people?.phone && (
-                                        <a href={getWhatsAppLink(app.crm_people.phone)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-sm font-bold text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded-lg w-fit transition-colors border border-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/20">
-                                            <MessageCircle className="w-4 h-4" /> Enviar WhatsApp
-                                        </a>
-                                    )}
-                                </div>
+                                            <div className="flex-1 min-w-0">
+                                                <span className="text-slate-900 font-bold block truncate text-base">{app.crm_people?.full_name || 'Sin nombre'}</span>
+                                                <div className="flex items-center gap-3 mt-1">
+                                                    {app.crm_people?.phone && (
+                                                        <a href={getWhatsAppLink(app.crm_people.phone)} target="_blank" rel="noreferrer" className="text-[12px] text-emerald-600 font-bold flex items-center gap-1 hover:underline">
+                                                            <MessageCircle className="w-3.5 h-3.5" /> +{app.crm_people.phone}
+                                                        </a>
+                                                    )}
+                                                </div>
+                                            </div>
 
-                                {/* 3. Servicio y Recurso Asignado */}
-                                <div className="flex-1 min-w-0 bg-slate-50 p-4 rounded-2xl border border-slate-100/50">
-                                    <div className="flex justify-between items-start mb-2">
-                                        <p className="font-bold text-slate-800 text-sm truncate pr-2">{app.catalog_items?.name || 'Servicio general'}</p>
-                                        <p className="font-black text-slate-900 text-base shrink-0">${app.catalog_items?.price?.toLocaleString() || 0}</p>
-                                    </div>
-                                    <p className="text-xs font-bold text-slate-500 flex items-center gap-2 uppercase tracking-wider">
-                                        <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> {app.catalog_items?.duration_minutes || 30}m</span>
-                                        <span className="text-slate-300">•</span>
-                                        <span className="truncate">{app.resources?.name || 'Cualquiera'}</span>
-                                    </p>
-                                </div>
+                                            <div className="flex-1 min-w-0">
+                                                <span className="text-slate-700 text-sm font-medium block truncate">{app.catalog_items?.name || 'Servicio General'}</span>
+                                                <span className="text-[12px] text-slate-500 block mt-1 font-medium">{app.resources?.name || 'Sin asignar'} • ${app.catalog_items?.price?.toLocaleString() || 0}</span>
+                                            </div>
 
-                                {/* 4. Acciones (Cambiar Estado y Cobrar) */}
-                                <div className="shrink-0 w-full md:w-48 mt-2 md:mt-0 flex flex-col gap-2.5 border-t md:border-t-0 border-slate-100 pt-4 md:pt-0">
-                                    <select 
-                                        value={app.status || 'pending'}
-                                        onChange={(e) => handleStatusChange(app.id, e.target.value)}
-                                        className="w-full p-3 bg-white border border-slate-200 text-slate-700 text-xs uppercase tracking-widest font-black rounded-xl cursor-pointer hover:border-brand-400 focus:ring-2 focus:ring-brand-500/20 outline-none transition-all shadow-sm text-center appearance-none"
-                                    >
-                                        <option value="pending">Marcar: Espera</option>
-                                        <option value="confirmed">Marcar: Reservado</option>
-                                        <option value="attended">Marcar: Atendido</option>
-                                        <option value="no_show">Marcar: Ausente</option>
-                                        <option value="cancelled">Cancelar Turno</option>
-                                    </select>
+                                            <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2 shrink-0 w-full md:w-auto">
+                                                {!isPaid && app.status !== 'cancelled' && app.status !== 'no_show' ? (
+                                                    <button onClick={() => setSelectedAppointmentForCheckout(app)} className="py-2 px-4 md:w-36 bg-brand-50 text-brand-700 border border-brand-200 text-[11px] uppercase tracking-widest font-black rounded-lg transition-all flex items-center justify-center gap-1.5 hover:bg-brand-100 active:scale-95">
+                                                        <DollarSign className="w-3.5 h-3.5" /> Cobrar
+                                                    </button>
+                                                ) : isPaid ? (
+                                                    <div className="py-2 px-4 md:w-36 bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] uppercase tracking-widest font-black rounded-lg flex items-center justify-center gap-1.5">
+                                                        <CheckCircle2 className="w-3.5 h-3.5" /> Pagado
+                                                    </div>
+                                                ) : (
+                                                    <div className="md:w-36"></div> 
+                                                )}
 
-                                    {/* Botón de Cobro Inteligente (Se oculta si ya se pagó o si se canceló) */}
-                                    {!isPaid && app.status !== 'cancelled' && app.status !== 'no_show' ? (
-                                        <button 
-                                            onClick={() => setSelectedAppointmentForCheckout(app)}
-                                            className="w-full px-4 py-3 bg-brand-600 hover:bg-brand-500 text-white text-xs uppercase tracking-widest font-black rounded-xl transition-all shadow-lg shadow-brand-500/20 flex items-center justify-center gap-1.5 active:scale-95 focus:outline-none focus:ring-4 focus:ring-brand-500/30"
-                                        >
-                                            <DollarSign className="w-4 h-4" /> Cobrar Turno
-                                        </button>
-                                    ) : isPaid ? (
-                                        <div className="w-full px-4 py-3 bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs uppercase tracking-widest font-black rounded-xl flex items-center justify-center gap-1.5">
-                                            <CheckCircle2 className="w-4 h-4" /> Pagado
+                                                <div className="flex items-center gap-2">
+                                                    <select value={app.status || 'pending'} onChange={(e) => handleStatusChange(app.id, e.target.value)} className="flex-1 md:w-32 text-xs font-bold bg-white border border-slate-200 rounded-lg px-2 py-2 outline-none cursor-pointer hover:border-slate-300">
+                                                        <option value="pending">En Espera</option>
+                                                        <option value="confirmed">Reservado</option>
+                                                        <option value="attended">Atendido</option>
+                                                        <option value="no_show">Ausente</option>
+                                                        <option value="cancelled">Cancelado</option>
+                                                    </select>
+                                                    <button onClick={() => promptDeleteAppointment(app.id)} className="p-2 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all border border-transparent hover:border-red-200 md:opacity-0 group-hover:opacity-100" title="Eliminar turno">
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                </div>
+                                            </div>
                                         </div>
-                                    ) : null}
-                                </div>
-
+                                    );
+                                })}
                             </div>
-                        );
-                    })
+                        )}
+
+                        {viewMode === 'weekly' && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-0 border-t border-slate-200 h-full">
+                                {weekDays.map((day) => {
+                                    const dateStr = day.toISOString().split('T')[0];
+                                    const dayApps = filteredAppointments.filter(app => app.start_time.startsWith(dateStr));
+                                    const isToday = dateStr === new Date().toISOString().split('T')[0];
+
+                                    return (
+                                        <div key={dateStr} className={`flex flex-col border-r border-b xl:border-b-0 border-slate-200 min-h-[500px] ${isToday ? 'bg-brand-50/20' : 'bg-slate-50/20'}`}>
+                                            
+                                            <div className={`p-4 border-b border-slate-200 text-center sticky top-0 z-10 backdrop-blur-md ${isToday ? 'bg-brand-50' : 'bg-white/80'}`}>
+                                                <h3 className={`text-xs font-black uppercase tracking-widest ${isToday ? 'text-brand-600' : 'text-slate-400'}`}>
+                                                    {getDayName(day)}
+                                                </h3>
+                                                <p className={`text-3xl font-black mt-1 ${isToday ? 'text-brand-700' : 'text-slate-800'}`}>
+                                                    {day.getDate()}
+                                                </p>
+                                                <p className="text-[10px] text-slate-400 font-bold mt-1">
+                                                    {dayApps.length} Turnos
+                                                </p>
+                                            </div>
+
+                                            <div className="flex flex-col gap-3 p-3 overflow-y-auto">
+                                                {dayApps.length === 0 ? (
+                                                    <div className="text-center py-10 opacity-50"><CalendarIcon className="w-8 h-8 text-slate-300 mx-auto mb-2" /><p className="text-xs font-bold text-slate-400">Libre</p></div>
+                                                ) : (
+                                                    dayApps.map(app => {
+                                                        const status = statusConfig[app.status || 'pending'];
+                                                        const isPaid = !!app.operation_id;
+
+                                                        return (
+                                                            <div key={app.id} className={`flex flex-col p-3 border-l-4 ${status.borderColor} ${status.rowBg} rounded-r-xl border-y border-r border-slate-200 shadow-sm gap-1.5 hover:shadow-md transition-shadow relative group`}>
+                                                                <div className="flex justify-between items-start">
+                                                                    <span className={`text-sm font-black flex items-center gap-1 ${status.timeColor}`}>
+                                                                        <status.icon className="w-3.5 h-3.5" /> {formatTime(app.start_time)}
+                                                                    </span>
+                                                                    
+                                                                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-white/80 backdrop-blur-sm rounded-md absolute right-2 top-2 p-0.5 shadow-sm border border-slate-100">
+                                                                        {!isPaid && app.status !== 'cancelled' && app.status !== 'no_show' && (
+                                                                            <button onClick={() => setSelectedAppointmentForCheckout(app)} className="text-brand-600 hover:bg-brand-50 p-1.5 rounded-md transition-colors" title="Cobrar">
+                                                                                <DollarSign className="w-3.5 h-3.5" />
+                                                                            </button>
+                                                                        )}
+                                                                        <button onClick={() => promptDeleteAppointment(app.id)} className="text-red-500 hover:bg-red-50 p-1.5 rounded-md transition-colors" title="Eliminar">
+                                                                            <Trash2 className="w-3.5 h-3.5" />
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                                
+                                                                <span className="font-bold text-slate-800 text-[13px] truncate leading-tight pr-4">{app.crm_people?.full_name || 'Sin nombre'}</span>
+                                                                <span className="text-[11px] text-slate-500 font-medium truncate">{app.catalog_items?.name}</span>
+                                                                
+                                                                <select
+                                                                    value={app.status || 'pending'}
+                                                                    onChange={(e) => handleStatusChange(app.id, e.target.value)}
+                                                                    className="mt-2 text-[11px] font-bold bg-white border border-slate-200 rounded-md px-1.5 py-1.5 outline-none cursor-pointer w-full text-slate-600 shadow-sm appearance-none text-center"
+                                                                >
+                                                                    <option value="pending">Espera</option>
+                                                                    <option value="confirmed">Reservado</option>
+                                                                    <option value="attended">Atendido</option>
+                                                                    <option value="no_show">Ausente</option>
+                                                                    <option value="cancelled">Cancelado</option>
+                                                                </select>
+                                                            </div>
+                                                        );
+                                                    })
+                                                )}
+                                            </div>
+
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </>
                 )}
             </div>
 
-            {/* MODALES AUXILIARES */}
             <NewAppointmentModal isOpen={isNewModalOpen} onClose={() => setIsNewModalOpen(false)} onSuccess={() => { setIsNewModalOpen(false); fetchAgenda(); }} />
             <CheckoutModal isOpen={!!selectedAppointmentForCheckout} onClose={() => setSelectedAppointmentForCheckout(null)} appointment={selectedAppointmentForCheckout} onSuccess={() => { setSelectedAppointmentForCheckout(null); fetchAgenda(); }} />
+
+            <Transition appear show={deleteModalOpen} as={Fragment}>
+                <Dialog as="div" className="relative z-[99999]" onClose={() => !isDeleting && setDeleteModalOpen(false)}>
+                    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" />
+                    <div className="fixed inset-0 overflow-y-auto">
+                        <div className="flex min-h-full items-center justify-center p-4 text-center">
+                            <Dialog.Panel className="w-full max-w-sm transform overflow-hidden rounded-3xl bg-white p-6 text-left align-middle shadow-xl transition-all animate-in zoom-in-95">
+                                <div className="flex flex-col items-center justify-center text-center">
+                                    <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mb-4 border border-red-100 shadow-inner">
+                                        <Trash2 className="w-8 h-8 text-red-500" />
+                                    </div>
+                                    <Dialog.Title as="h3" className="text-xl font-black text-slate-800 mb-2">
+                                        ¿Eliminar Turno?
+                                    </Dialog.Title>
+                                    <p className="text-sm text-slate-500 font-medium mb-8 px-2">
+                                        Esta acción borrará el turno de forma permanente de tu agenda. No podrás recuperar esta información.
+                                    </p>
+                                </div>
+                                <div className="flex gap-3">
+                                    <button
+                                        type="button"
+                                        className="flex-1 px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold transition-colors"
+                                        onClick={() => setDeleteModalOpen(false)}
+                                        disabled={isDeleting}
+                                    >
+                                        Cancelar
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="flex-1 px-4 py-3 bg-red-600 hover:bg-red-500 text-white rounded-xl font-bold transition-colors flex justify-center items-center gap-2 shadow-lg shadow-red-500/30 active:scale-95"
+                                        onClick={confirmDeleteAppointment}
+                                        disabled={isDeleting}
+                                    >
+                                        {isDeleting ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Eliminar'}
+                                    </button>
+                                </div>
+                            </Dialog.Panel>
+                        </div>
+                    </div>
+                </Dialog>
+            </Transition>
         </div>
     );
 }

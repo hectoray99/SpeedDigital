@@ -5,13 +5,13 @@ import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, User, Mail, Hash, Loader2, Phone } from 'lucide-react';
 
-interface CreateStudentModalProps {
+interface CreateClientModalProps {
     isOpen: boolean;
     onClose: () => void;
     onSuccess: () => void;
 }
 
-export default function CreateStudentModal({ isOpen, onClose, onSuccess }: CreateStudentModalProps) {
+export default function CreateClientModal({ isOpen, onClose, onSuccess }: CreateClientModalProps) {
     const { orgData } = useAuthStore();
 
     const [formData, setFormData] = useState({
@@ -27,7 +27,6 @@ export default function CreateStudentModal({ isOpen, onClose, onSuccess }: Creat
         if (!orgData?.id) return toast.error('Error de sesión. Recargá la página.');
 
         // --- BLINDAJE DE DATOS (REGEX) ---
-        // Letras, espacios, tildes, ñ y apóstrofes
         const nameRegex = /^[a-zA-ZÀ-ÿ\s']+$/; 
         const phoneRegex = /^[0-9+\-\s()]+$/; 
 
@@ -36,7 +35,7 @@ export default function CreateStudentModal({ isOpen, onClose, onSuccess }: Creat
         }
         
         if (formData.phone && !phoneRegex.test(formData.phone.trim())) {
-            return toast.error('El teléfono contiene caracteres inválidos (letras o símbolos raros).');
+            return toast.error('El teléfono contiene caracteres inválidos.');
         }
 
         setIsLoading(true);
@@ -56,18 +55,18 @@ export default function CreateStudentModal({ isOpen, onClose, onSuccess }: Creat
                 }]);
 
             if (error) {
-                if (error.code === '23505') throw new Error('Ya existe un cliente con ese DNI o Email en la base de datos.');
+                if (error.code === '23505') throw new Error('Ya existe un cliente con ese DNI o Email.');
                 throw error;
             }
 
-            toast.success('Alumno/Cliente registrado correctamente');
+            toast.success('Cliente registrado correctamente');
             setFormData({ full_name: '', identifier: '', email: '', phone: '' });
             onSuccess();
             onClose();
 
         } catch (error: any) {
-            console.error('Error al crear alumno:', error);
-            toast.error(error.message || 'Hubo un error al registrar a la persona');
+            console.error('Error al crear cliente:', error);
+            toast.error(error.message || 'Hubo un error al registrar al cliente');
         } finally {
             setIsLoading(false);
         }
@@ -85,7 +84,7 @@ export default function CreateStudentModal({ isOpen, onClose, onSuccess }: Creat
                     className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden relative"
                 >
                     <div className="flex justify-between items-center p-6 border-b border-slate-100 bg-slate-50 shrink-0">
-                        <h3 className="text-xl font-black text-slate-800">Nuevo Cliente/Alumno</h3>
+                        <h3 className="text-xl font-black text-slate-800">Nuevo Cliente</h3>
                         <button onClick={onClose} disabled={isLoading} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-xl transition-colors disabled:opacity-50">
                             <X className="w-5 h-5" />
                         </button>

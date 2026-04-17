@@ -11,15 +11,11 @@ export default function Salon() {
     const [tables, setTables] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     
-    // Estados para Modales
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [selectedTable, setSelectedTable] = useState<any | null>(null);
 
     const isOwnerOrAdmin = userRole === 'owner' || userRole === 'admin';
 
-    // =========================================================================
-    // INICIALIZACIÓN
-    // =========================================================================
     useEffect(() => {
         if (orgData?.id) {
             fetchSalonData();
@@ -27,10 +23,11 @@ export default function Salon() {
     }, [orgData?.id]);
 
     async function fetchSalonData() {
+        if (!orgData?.id) return; // BLINDAJE DE TYPESCRIPT
+        
         try {
             setLoading(true);
             
-            // 1. Traemos todas las mesas activas de este local
             const { data: resourcesData, error: resourcesError } = await supabase
                 .from('resources')
                 .select('*')
@@ -40,7 +37,6 @@ export default function Salon() {
 
             if (resourcesError) throw resourcesError;
             
-            // 2. Traemos todas las comandas (operaciones pendientes) de este local
             const { data: activeOrders, error: ordersError } = await supabase
                 .from('operations')
                 .select('id, total_amount, metadata')
@@ -49,10 +45,8 @@ export default function Salon() {
 
             if (ordersError) throw ordersError;
 
-            // 3. Filtramos recursos que sean específicamente mesas
             const onlyTables = (resourcesData || []).filter(item => item.availability_rules?.is_table === true);
             
-            // 4. Cruzamos los datos: A cada mesa le asignamos su comanda activa (si la tiene)
             const tablesWithOrders = onlyTables.map(table => {
                 const currentOrder = activeOrders?.find(order => order.metadata?.table_id === table.id);
                 return {
@@ -70,16 +64,12 @@ export default function Salon() {
         }
     }
 
-    // =========================================================================
-    // HANDLERS SECUNDARIOS (Edición Rápida)
-    // =========================================================================
     const handleRenameTable = async (e: React.MouseEvent, table: any) => {
-        // Detenemos la propagación para no abrir el modal de ventas de la mesa sin querer
         e.stopPropagation(); 
+        if (!orgData?.id) return;
         
         const newName = window.prompt('Ingresá el nuevo nombre para la mesa:', table.name);
         
-        // Validamos que no esté vacío, cancelado o sea igual al anterior
         if (newName === null || !newName.trim() || newName.trim() === table.name) return;
 
         try {
@@ -87,7 +77,7 @@ export default function Salon() {
                 .from('resources')
                 .update({ name: newName.trim() })
                 .eq('id', table.id)
-                .eq('organization_id', orgData?.id); // Blindaje extra
+                .eq('organization_id', orgData.id); 
 
             if (error) throw error;
             
@@ -98,13 +88,9 @@ export default function Salon() {
         }
     };
 
-    // =========================================================================
-    // RENDER PRINCIPAL DEL SALÓN
-    // =========================================================================
     return (
         <div className="pb-24 lg:pb-0 animate-in fade-in duration-500">
             
-            {/* Modales Flotantes */}
             <CreateTableModal
                 isOpen={isCreateModalOpen}
                 onClose={() => setIsCreateModalOpen(false)}
@@ -115,12 +101,11 @@ export default function Salon() {
                 isOpen={!!selectedTable}
                 onClose={() => {
                     setSelectedTable(null);
-                    fetchSalonData(); // Refrescamos el salón al cerrar la mesa
+                    fetchSalonData(); 
                 }}
                 table={selectedTable}
             />
 
-            {/* Cabecera */}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
                 <div>
                     <h1 className="text-2xl sm:text-3xl font-black text-slate-800 tracking-tight">Mapa del Salón</h1>
@@ -137,7 +122,6 @@ export default function Salon() {
                 )}
             </div>
 
-            {/* Grilla de Mesas */}
             {loading ? (
                 <div className="p-16 flex flex-col items-center justify-center text-slate-400 gap-4 animate-in fade-in duration-500">
                     <Loader2 className="w-10 h-10 animate-spin text-brand-500" />
@@ -166,10 +150,8 @@ export default function Salon() {
                                     : 'shadow-sm border-2 border-slate-100 hover:border-emerald-300 hover:shadow-md hover:shadow-emerald-500/10'
                                 }`}
                             >
-                                {/* Barra de estado superior (Roja = Ocupada, Verde = Libre) */}
                                 <div className={`absolute top-0 left-0 w-full h-1.5 transition-colors ${isOccupied ? 'bg-red-500' : 'bg-emerald-400'}`}></div>
 
-                                {/* Botón de Edición (Solo Dueños) - Se muestra al pasar el mouse (hover) */}
                                 {isOwnerOrAdmin && (
                                     <button 
                                         onClick={(e) => handleRenameTable(e, table)}

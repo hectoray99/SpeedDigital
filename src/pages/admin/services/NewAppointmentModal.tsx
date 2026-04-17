@@ -2,7 +2,7 @@ import { useState, useEffect, Fragment } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { supabase } from '../../../lib/supabase';
 import { useAuthStore } from '../../../store/authStore';
-import { X, User, Phone, Search, Scissors, Calendar as CalendarIcon, Clock, Loader2, CheckCircle2 } from 'lucide-react';
+import { X, User, Phone, Search, Scissors, Calendar as CalendarIcon, Loader2, CheckCircle2, Repeat } from 'lucide-react';
 import { toast } from 'sonner';
 import { bookingService } from '../../../services/bookingService';
 
@@ -31,30 +31,34 @@ export default function NewAppointmentModal({ isOpen, onClose, onSuccess }: NewA
         serviceId: '',
         resourceId: '', 
         date: new Date().toISOString().split('T')[0],
-        time: ''
+        time: '',
+        isRecurring: false,
+        repeatWeeks: 4 
     });
 
-    // =========================================================================
-    // INICIALIZACIÓN Y BÚSQUEDAS (Efectos)
-    // =========================================================================
-
-    // 1. Cargar servicios y profesionales al abrir el modal
     useEffect(() => {
         if (isOpen && orgData?.id) {
             fetchInitialData();
-            // Resetear el estado para que un turno anterior no quede pegado
-            setFormData(prev => ({ ...prev, time: '', clientName: '', clientPhone: '' }));
+            setFormData(prev => ({ 
+                ...prev, 
+                time: '', 
+                clientName: '', 
+                clientPhone: '', 
+                isRecurring: false, 
+                repeatWeeks: 4 
+            }));
             setAvailableSlots([]);
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isOpen, orgData?.id]);
 
-    // 2. Si cambian Fecha, Servicio o Profesional, recalcular los Horarios Disponibles
     useEffect(() => {
         if (formData.date && formData.serviceId && formData.resourceId) {
             calculateSlots();
         } else {
             setAvailableSlots([]); 
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [formData.date, formData.serviceId, formData.resourceId]);
 
     async function fetchInitialData() {
@@ -92,16 +96,12 @@ export default function NewAppointmentModal({ isOpen, onClose, onSuccess }: NewA
             );
             setAvailableSlots(slots);
         } catch (error) {
-            console.error("Error calculando horarios", error);
             setAvailableSlots([]);
         } finally {
             setCalculatingSlots(false);
         }
     }
 
-    // =========================================================================
-    // CREACIÓN DEL TURNO (Base de datos)
-    // =========================================================================
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!orgData?.id) return;
@@ -110,7 +110,7 @@ export default function NewAppointmentModal({ isOpen, onClose, onSuccess }: NewA
         try {
             let personId = null;
             
-            // PASO A: Averiguar si el Cliente ya existe (Por Teléfono)
+            // PASO A: Averiguar si el Cliente ya existe
             const sanitizedPhone = formData.clientPhone.trim();
             if (sanitizedPhone) {
                 const { data: existingPerson } = await supabase
@@ -123,14 +123,14 @@ export default function NewAppointmentModal({ isOpen, onClose, onSuccess }: NewA
                 if (existingPerson) personId = existingPerson.id;
             }
 
-            // PASO B: Si es un cliente nuevo, lo creamos en el CRM
+            // PASO B: Si es cliente nuevo, lo creamos
             if (!personId) {
                 const { data: newPerson, error: personError } = await supabase
                     .from('crm_people')
                     .insert([{
                         organization_id: orgData.id,
                         full_name: formData.clientName.trim(),
-                        phone: sanitizedPhone || null, // Guardamos Null explícito si está vacío
+                        phone: sanitizedPhone || null,
                         type: 'client'
                     }])
                     .select('id')
@@ -140,18 +140,19 @@ export default function NewAppointmentModal({ isOpen, onClose, onSuccess }: NewA
                 personId = newPerson.id;
             }
 
-            // PASO C: Calcular el rango de tiempo del turno
+            // PASO C: Preparar turnos a insertar
             const service = services.find(s => s.id === formData.serviceId);
             const duration = service?.duration_minutes || 30;
 
-            // Formatear fechas respetando la zona horaria UTC de Supabase pero leyendo desde la selección local
-            const startDateTime = new Date(`${formData.date}T${formData.time}:00-03:00`); // Argentina Time (Ejemplo)
-            const endDateTime = new Date(startDateTime.getTime() + duration * 60000);
+            const datesToBook = formData.isRecurring 
+                ? bookingService.getRecurringDates(formData.date, formData.repeatWeeks - 1) 
+                : [formData.date];
 
-            // PASO D: Insertar el Turno
-            const { error: appointmentError } = await supabase
-                .from('appointments')
-                .insert([{
+            const appointmentsToInsert = datesToBook.map(dateStr => {
+                const startDateTime = new Date(`${dateStr}T${formData.time}:00-03:00`);
+                const endDateTime = new Date(startDateTime.getTime() + duration * 60000);
+                
+                return {
                     organization_id: orgData.id,
                     person_id: personId,
                     resource_id: formData.resourceId,
@@ -159,11 +160,17 @@ export default function NewAppointmentModal({ isOpen, onClose, onSuccess }: NewA
                     start_time: startDateTime.toISOString(),
                     end_time: endDateTime.toISOString(),
                     status: 'confirmed' 
-                }]);
+                };
+            });
+
+            // PASO D: Insertar en BD
+            const { error: appointmentError } = await supabase
+                .from('appointments')
+                .insert(appointmentsToInsert);
 
             if (appointmentError) throw appointmentError;
 
-            toast.success('Turno agendado con éxito');
+            toast.success(formData.isRecurring ? `¡${appointmentsToInsert.length} Turnos agendados con éxito!` : 'Turno agendado con éxito');
             onSuccess(); 
 
         } catch (error: any) {
@@ -174,9 +181,6 @@ export default function NewAppointmentModal({ isOpen, onClose, onSuccess }: NewA
         }
     };
 
-    // =========================================================================
-    // RENDER PRINCIPAL DEL MODAL
-    // =========================================================================
     return (
         <Transition appear show={isOpen} as={Fragment}>
             <Dialog as="div" className="relative z-[99999]" onClose={() => !loading && onClose()}>
@@ -185,7 +189,6 @@ export default function NewAppointmentModal({ isOpen, onClose, onSuccess }: NewA
                 <div className="fixed inset-0 overflow-hidden flex justify-end">
                     <Dialog.Panel className="relative w-full max-w-md bg-white h-full shadow-2xl flex flex-col transform transition-all animate-in slide-in-from-right duration-300">
                         
-                        {/* HEADER (Sticky) */}
                         <div className="flex items-center justify-between p-6 border-b border-slate-100 bg-slate-50/80 shrink-0 backdrop-blur-sm">
                             <div>
                                 <Dialog.Title as="h2" className="text-xl font-black text-slate-800">Nuevo Turno</Dialog.Title>
@@ -196,7 +199,6 @@ export default function NewAppointmentModal({ isOpen, onClose, onSuccess }: NewA
                             </button>
                         </div>
 
-                        {/* BODY (Scrollable) */}
                         <div className="flex-1 overflow-y-auto p-6 space-y-8 hide-scrollbar">
                             
                             {/* SECCIÓN 1: CLIENTE */}
@@ -272,7 +274,7 @@ export default function NewAppointmentModal({ isOpen, onClose, onSuccess }: NewA
                                 </div>
                             </section>
 
-                            {/* SECCIÓN 3: CALENDARIO Y SLOTS (Se opaca si faltan datos arriba) */}
+                            {/* SECCIÓN 3: CALENDARIO Y RECURRENCIA */}
                             <section className={(!formData.serviceId || !formData.resourceId) ? 'opacity-50 pointer-events-none transition-opacity' : 'transition-opacity'}>
                                 <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2 mb-4">
                                     <span className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center text-xs">3</span>
@@ -280,59 +282,90 @@ export default function NewAppointmentModal({ isOpen, onClose, onSuccess }: NewA
                                 </h3>
 
                                 <div className="space-y-6">
-                                    <div className="relative shadow-sm rounded-xl">
-                                        <CalendarIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                                        <input 
-                                            type="date" 
-                                            disabled={!formData.serviceId || !formData.resourceId}
-                                            className="w-full pl-11 p-3.5 border border-slate-200 bg-slate-50 rounded-xl focus:ring-2 focus:ring-brand-500/20 focus:bg-white outline-none font-bold text-slate-700 cursor-pointer disabled:cursor-not-allowed transition-all"
-                                            value={formData.date}
-                                            onChange={(e) => setFormData({...formData, date: e.target.value})}
-                                            min={new Date().toISOString().split('T')[0]} 
-                                        />
-                                    </div>
-
                                     <div>
-                                        <label className="text-xs font-bold text-slate-500 mb-3 ml-1 flex items-center justify-between">
-                                            <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> Horarios disponibles *</span>
-                                            {calculatingSlots && <Loader2 className="w-3.5 h-3.5 animate-spin text-brand-500" />}
-                                        </label>
-                                        
-                                        {/* MENSAJES INTELIGENTES DE UI */}
-                                        {!formData.serviceId || !formData.resourceId ? (
-                                            <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-center text-sm font-medium text-slate-500">
-                                                Elegí un servicio y un profesional para ver los horarios.
-                                            </div>
-                                        ) : !calculatingSlots && availableSlots.length === 0 ? (
-                                            <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-center text-sm font-bold text-red-600">
-                                                No hay horarios disponibles para este día. Chequeá la agenda del profesional.
-                                            </div>
-                                        ) : null}
-
-                                        {/* GRILLA DE BOTONES DE HORA */}
-                                        <div className="grid grid-cols-4 gap-2 max-h-[250px] overflow-y-auto pr-1 custom-scrollbar">
-                                            {availableSlots.map((time) => (
-                                                <button
-                                                    key={time}
-                                                    type="button"
-                                                    onClick={() => setFormData({...formData, time})}
-                                                    className={`py-2.5 rounded-xl text-sm font-black transition-all border-2 focus:outline-none focus:ring-2 focus:ring-brand-500/30 ${
-                                                        formData.time === time
-                                                            ? 'bg-brand-600 text-white border-brand-600 shadow-md shadow-brand-500/20'
-                                                            : 'bg-white text-slate-600 border-slate-100 hover:border-brand-300 hover:text-brand-600'
-                                                    }`}
-                                                >
-                                                    {time}
-                                                </button>
-                                            ))}
+                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 ml-1">Fecha de Inicio</label>
+                                        <div className="relative shadow-sm rounded-2xl">
+                                            <CalendarIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                                            <input 
+                                                type="date" 
+                                                disabled={!formData.serviceId || !formData.resourceId}
+                                                className="w-full pl-12 pr-4 py-4 bg-white border border-slate-200 rounded-2xl focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none font-bold text-slate-800 cursor-pointer disabled:cursor-not-allowed transition-all"
+                                                value={formData.date}
+                                                onChange={(e) => setFormData({...formData, date: e.target.value})}
+                                                min={new Date().toISOString().split('T')[0]} 
+                                            />
                                         </div>
                                     </div>
+
+                                    {formData.date && (
+                                        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                                            <label className="flex items-center gap-3 cursor-pointer">
+                                                <input 
+                                                    type="checkbox" 
+                                                    checked={formData.isRecurring}
+                                                    onChange={(e) => setFormData({...formData, isRecurring: e.target.checked})}
+                                                    className="w-5 h-5 rounded text-brand-600 focus:ring-brand-500"
+                                                />
+                                                <div>
+                                                    <p className="font-bold text-sm text-slate-800 flex items-center gap-1.5"><Repeat className="w-4 h-4"/> Hacer turno recurrente</p>
+                                                    <p className="text-xs text-slate-500 font-medium">Repetir el mismo día y hora en el futuro.</p>
+                                                </div>
+                                            </label>
+
+                                            {formData.isRecurring && (
+                                                <div className="mt-4 pt-4 border-t border-slate-200 animate-in slide-in-from-top-2 duration-200">
+                                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 ml-1">¿Por cuántas semanas?</label>
+                                                    <select 
+                                                        value={formData.repeatWeeks}
+                                                        onChange={(e) => setFormData({...formData, repeatWeeks: Number(e.target.value)})}
+                                                        className="w-full p-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none font-bold text-slate-700 appearance-none transition-all"
+                                                    >
+                                                        <option value={2}>2 Semanas (15 días)</option>
+                                                        <option value={4}>4 Semanas (1 Mes)</option>
+                                                        <option value={12}>12 Semanas (3 Meses)</option>
+                                                    </select>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {formData.date && (
+                                        <div className="bg-white p-5 md:p-6 rounded-3xl border border-slate-200 shadow-sm animate-in fade-in zoom-in-95 duration-300">
+                                            <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4 flex items-center justify-between">
+                                                <span>Horarios Disponibles</span>
+                                                {calculatingSlots && <Loader2 className="w-4 h-4 animate-spin text-brand-500" />}
+                                            </label>
+                                            
+                                            {!calculatingSlots && availableSlots.length === 0 ? (
+                                                <div className="text-center py-6 text-red-500 bg-red-50 rounded-2xl border border-red-100">
+                                                    <p className="font-bold text-sm">No hay horarios libres.</p>
+                                                </div>
+                                            ) : (
+                                                <div className="grid grid-cols-4 gap-2 max-h-[220px] overflow-y-auto pr-1 custom-scrollbar">
+                                                    {availableSlots.map(time => (
+                                                        <button
+                                                            key={time}
+                                                            type="button"
+                                                            onClick={() => setFormData({...formData, time})}
+                                                            className={`py-2.5 rounded-xl font-black transition-all border-2 text-sm ${
+                                                                formData.time === time
+                                                                    ? 'border-brand-500 bg-brand-50 text-brand-600 shadow-md shadow-brand-500/20'
+                                                                    : 'border-slate-100 text-slate-600 hover:border-brand-300 hover:bg-slate-50'
+                                                            }`}
+                                                        >
+                                                            {time}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                             </section>
 
                         </div>
 
-                        {/* FOOTER ACTIONS (Sticky Bottom) */}
+                        {/* FOOTER ACTIONS */}
                         <div className="p-6 border-t border-slate-100 bg-white z-10 shrink-0 shadow-[0_-10px_20px_-10px_rgba(0,0,0,0.05)]">
                             <button 
                                 onClick={handleSubmit}

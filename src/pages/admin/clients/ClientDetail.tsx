@@ -85,7 +85,7 @@ export default function StudentDetail() {
 
         } catch (error: any) {
             toast.error('No se pudo cargar el perfil del cliente.');
-            navigate('/admin/students');
+            navigate('/admin/clients');
         } finally {
             setLoading(false);
         }
@@ -178,7 +178,7 @@ export default function StudentDetail() {
             {/* --- CABECERA Y BOTÓN VOLVER --- */}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <button
-                    onClick={() => navigate('/admin/students')}
+                    onClick={() => navigate('/admin/clients')}
                     className="flex items-center gap-2 text-slate-500 hover:text-brand-600 transition-colors font-bold text-sm bg-white px-4 py-2.5 rounded-xl shadow-sm border border-slate-200 active:scale-95"
                 >
                     <ArrowLeft className="w-4 h-4" /> Volver al Directorio

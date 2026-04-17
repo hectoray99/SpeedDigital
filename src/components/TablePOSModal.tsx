@@ -1,7 +1,7 @@
 import { useState, useEffect, Fragment } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { supabase } from '../lib/supabase';
-import { useAuthStore } from '../store/authStore';
+import { supabase } from '../lib/supabase'; // <-- FIX PATH
+import { useAuthStore } from '../store/authStore'; // <-- FIX PATH
 import { X, Search, Plus, Minus, MessageSquare, UtensilsCrossed, Send, Receipt, Banknote, CreditCard, SmartphoneNfc, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -12,7 +12,7 @@ interface TablePOSModalProps {
 }
 
 interface CartItem {
-    cartItemId: string; // ID temporal para manejar el carrito local
+    cartItemId: string; 
     product: any;
     quantity: number;
     note: string;
@@ -33,17 +33,16 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
     const [existingItems, setExistingItems] = useState<any[]>([]);
     const [isSaving, setIsSaving] = useState(false);
 
-    // Estados de Sub-Modales (Notas y Cobro)
+    // Estados de Sub-Modales
     const [noteModalOpen, setNoteModalOpen] = useState(false);
     const [selectedCartItemId, setSelectedCartItemId] = useState<string | null>(null);
     const [currentNoteText, setCurrentNoteText] = useState('');
     
+    // --- ESTADOS DE PAGO Y PROPINA ---
     const [isCheckout, setIsCheckout] = useState(false);
     const [paymentMethod, setPaymentMethod] = useState('cash');
+    const [tipAmount, setTipAmount] = useState(''); 
 
-    // =========================================================================
-    // INICIALIZACIÓN
-    // =========================================================================
     useEffect(() => {
         if (isOpen && orgData?.id) {
             fetchMenu();
@@ -52,6 +51,7 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
             setSearch('');
             setNoteModalOpen(false);
             setIsCheckout(false);
+            setTipAmount('');
 
             if (table?.activeOrder) {
                 fetchExistingItems();
@@ -80,14 +80,13 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
             const { data, error } = await supabase
                 .from('catalog_items')
                 .select('*')
-                .eq('organization_id', orgData.id)
+                .eq('organization_id', orgData!.id)
                 .eq('is_active', true)
                 .order('name');
 
             if (error) throw error;
             setProducts(data || []);
             
-            // Extraer categorías únicas para los tabs de filtrado
             const uniqueCategories = Array.from(new Set((data || []).map(p => p.properties?.category).filter(Boolean))) as string[];
             setCategories(['Todas', ...uniqueCategories]);
         } catch (error) {
@@ -97,12 +96,8 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
         }
     }
 
-    // =========================================================================
-    // MANEJO DEL CARRITO TEMPORAL
-    // =========================================================================
     const addToCart = (product: any) => {
         setCart(prev => {
-            // Buscamos si ya existe el producto Y NO tiene notas especiales agregadas
             const existingIndex = prev.findIndex(item => item.product.id === product.id && !item.note);
             if (existingIndex >= 0) {
                 const newCart = [...prev];
@@ -120,16 +115,13 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
                 return newQty > 0 ? { ...item, quantity: newQty } : item;
             }
             return item;
-        }).filter(item => item.quantity > 0)); // Limpia los de cantidad 0
+        }).filter(item => item.quantity > 0));
     };
 
     const removeItem = (cartItemId: string) => {
         setCart(prev => prev.filter(item => item.cartItemId !== cartItemId));
     };
 
-    // =========================================================================
-    // MANEJO DE NOTAS PARA COCINA
-    // =========================================================================
     const openNoteModal = (cartItemId: string) => {
         const item = cart.find(i => i.cartItemId === cartItemId);
         if (item) {
@@ -147,8 +139,6 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
             const item = newCart[itemIndex];
             const trimmedNote = currentNoteText.trim();
             
-            // Si el item tiene cantidad > 1 y le ponemos una nota, tenemos que separarlo
-            // Ej: 3 Hamburguesas -> 2 Normales + 1 (Sin Cebolla)
             if (item.quantity > 1 && trimmedNote !== item.note) {
                 newCart[itemIndex].quantity--;
                 newCart.push({ cartItemId: crypto.randomUUID(), product: item.product, quantity: 1, note: trimmedNote });
@@ -160,9 +150,6 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
         setNoteModalOpen(false);
     };
 
-    // =========================================================================
-    // COMANDAR (ENVIAR A COCINA / CREAR OPERACIÓN)
-    // =========================================================================
     const sendToKitchen = async () => {
         if (cart.length === 0) return toast.error("La comanda está vacía");
         setIsSaving(true);
@@ -170,13 +157,12 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
             const newCartTotal = cart.reduce((sum, item) => sum + (item.product.price * item.quantity), 0);
             let currentOperationId = table?.activeOrder?.id;
 
-            // 1. Si la mesa está vacía, creamos la Cabecera de la Operación (El Ticket)
             if (!currentOperationId) {
                 const { data: operation, error: opError } = await supabase
                     .from('operations')
                     .insert([{
-                        organization_id: orgData.id,
-                        status: 'pending', // Mesa Abierta
+                        organization_id: orgData!.id,
+                        status: 'pending', 
                         total_amount: newCartTotal,
                         metadata: { table_id: table.id, table_name: table.name }
                     }])
@@ -184,14 +170,12 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
                 if (opError) throw opError;
                 currentOperationId = operation.id;
             } else {
-                // Si la mesa ya estaba abierta, actualizamos el total agregando el nuevo importe
                 const updatedTotal = table.activeOrder.total_amount + newCartTotal;
                 await supabase.from('operations').update({ total_amount: updatedTotal }).eq('id', currentOperationId);
             }
 
-            // 2. Insertamos las Líneas (Los Platos) en la base de datos
             const lines = cart.map(item => ({
-                organization_id: orgData.id,
+                organization_id: orgData!.id,
                 operation_id: currentOperationId,
                 item_id: item.product.id,
                 quantity: item.quantity,
@@ -211,26 +195,23 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
         }
     };
 
-    // =========================================================================
-    // COBRAR (CERRAR MESA)
-    // =========================================================================
     const handleCheckout = async () => {
         setIsSaving(true);
         try {
             const finalTotal = table.activeOrder.total_amount;
+            const tip = Number(tipAmount) || 0;
 
-            // 1. Cerramos la Operación
             const { error: opError } = await supabase
                 .from('operations')
                 .update({ status: 'paid', balance: 0 })
                 .eq('id', table.activeOrder.id);
             if (opError) throw opError;
 
-            // 2. Generamos el Ingreso en Caja (Finanzas)
+            // 1. Ingreso Base de la Mesa
             const { error: financeError } = await supabase
                 .from('finance_ledger')
                 .insert([{
-                    organization_id: orgData.id,
+                    organization_id: orgData!.id,
                     operation_id: table.activeOrder.id,
                     type: 'income',
                     amount: finalTotal,
@@ -238,6 +219,18 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
                     notes: `Cobro de ${table.name}`
                 }]);
             if (financeError) throw financeError;
+
+            // 2. Ingreso de la Propina (Separada para el Tronco)
+            if (tip > 0) {
+                await supabase.from('finance_ledger').insert([{
+                    organization_id: orgData!.id,
+                    operation_id: table.activeOrder.id,
+                    type: 'income',
+                    amount: tip,
+                    payment_method: paymentMethod,
+                    notes: 'PROPINA_TRONCO'
+                }]);
+            }
 
             toast.success("¡Mesa Cobrada con Éxito!");
             onClose();
@@ -248,8 +241,8 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
         }
     };
 
-    // Filtrado de Menú
-    const filteredProducts = products.filter(p => {
+    // FIX: (p: any) para que TypeScript sepa que es dinámico
+    const filteredProducts = products.filter((p: any) => {
         const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase());
         const matchesCategory = activeCategory === 'Todas' || p.properties?.category === activeCategory;
         return matchesSearch && matchesCategory;
@@ -259,9 +252,6 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
     const existingTotal = table?.activeOrder?.total_amount || 0;
     const finalTotal = existingTotal + newCartTotal;
 
-    // =========================================================================
-    // RENDER: LAYOUT DE 2 COLUMNAS (COMANDA / CATÁLOGO)
-    // =========================================================================
     return (
         <Transition appear show={isOpen} as={Fragment}>
             <Dialog as="div" className="relative z-[99990]" onClose={() => !isSaving && onClose()}>
@@ -271,10 +261,8 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
                     <div className="flex min-h-[100dvh] md:min-h-full items-end md:items-center justify-center p-0 md:p-4">
                         <Dialog.Panel className="w-full md:max-w-6xl h-[95vh] md:h-[85vh] bg-white rounded-t-3xl md:rounded-3xl shadow-2xl overflow-hidden flex flex-col md:flex-row transform transition-all animate-in slide-in-from-bottom-full md:slide-in-from-bottom-0 md:zoom-in-95">
                             
-                            {/* --- PANEL IZQUIERDO: COMANDA Y TICKET --- */}
+                            {/* --- PANEL IZQUIERDO --- */}
                             <div className="w-full md:w-1/3 bg-slate-50 border-b md:border-r md:border-b-0 border-slate-200 flex flex-col h-1/2 md:h-full z-20">
-                                
-                                {/* Header Mesa */}
                                 <div className="p-4 bg-slate-900 text-white flex justify-between items-center shrink-0 shadow-sm">
                                     <div>
                                         <Dialog.Title as="h2" className="text-xl font-black">{table?.name}</Dialog.Title>
@@ -287,10 +275,7 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
                                     </button>
                                 </div>
 
-                                {/* Listado de Platos (Viejos y Nuevos) */}
                                 <div className="flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar pb-32 md:pb-4">
-                                    
-                                    {/* Platos que ya están en la mesa */}
                                     {existingItems.map((item, idx) => (
                                         <div key={`exist_${idx}`} className="bg-white p-3 rounded-xl border border-slate-200 flex flex-col gap-1 opacity-70">
                                             <div className="flex justify-between items-start">
@@ -304,7 +289,6 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
                                         </div>
                                     ))}
 
-                                    {/* Divisor si hay platos viejos y nuevos mezclados */}
                                     {existingItems.length > 0 && cart.length > 0 && (
                                         <div className="flex items-center gap-2 py-2">
                                             <div className="h-px bg-slate-200 flex-1"></div>
@@ -313,14 +297,12 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
                                         </div>
                                     )}
 
-                                    {/* Carrito Vacío */}
                                     {cart.length === 0 && existingItems.length === 0 ? (
                                         <div className="h-full flex flex-col items-center justify-center text-slate-400">
                                             <UtensilsCrossed className="w-12 h-12 mb-2 opacity-50" />
                                             <p className="font-bold">La mesa está vacía</p>
                                         </div>
                                     ) : (
-                                        /* Platos por enviar a cocina */
                                         cart.map((item) => (
                                             <div key={item.cartItemId} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-2 border-l-4 border-l-brand-400">
                                                 <div className="flex justify-between items-start">
@@ -328,9 +310,7 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
                                                         <p className="font-bold text-slate-800 leading-tight">{item.product.name}</p>
                                                         <p className="text-brand-600 font-black text-sm">${(item.product.price * item.quantity).toLocaleString()}</p>
                                                         {item.note && (
-                                                            <p className="text-xs font-bold text-orange-600 bg-orange-50 p-1.5 rounded border border-orange-100 mt-1 inline-block">
-                                                                Nota: {item.note}
-                                                            </p>
+                                                            <p className="text-xs font-bold text-orange-600 bg-orange-50 p-1.5 rounded border border-orange-100 mt-1 inline-block">Nota: {item.note}</p>
                                                         )}
                                                     </div>
                                                     <button onClick={() => openNoteModal(item.cartItemId)} disabled={isSaving} className={`p-1.5 rounded-lg transition-colors disabled:opacity-50 ${item.note ? 'text-orange-500 bg-orange-50' : 'text-slate-400 bg-slate-100 hover:bg-slate-200'}`}>
@@ -350,7 +330,6 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
                                     )}
                                 </div>
 
-                                {/* Footer Fijo: Total y Botones de Acción */}
                                 <div className="absolute md:relative bottom-0 left-0 w-full p-4 md:p-5 bg-white border-t border-slate-200 shadow-[0_-10px_15px_-3px_rgba(0,0,0,0.05)] shrink-0 z-30">
                                     <div className="flex justify-between items-center mb-4">
                                         <span className="text-slate-500 font-bold uppercase tracking-widest text-xs">Total Mesa</span>
@@ -369,11 +348,10 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
                                 </div>
                             </div>
 
-                            {/* --- PANEL DERECHO: CATÁLOGO o CHECKOUT --- */}
+                            {/* --- PANEL DERECHO --- */}
                             <div className="w-full md:w-2/3 bg-slate-100 flex flex-col h-1/2 md:h-full overflow-hidden relative z-10">
                                 {!isCheckout ? (
                                     <>
-                                        {/* Buscador y Filtros */}
                                         <div className="bg-white p-4 shadow-sm z-10 shrink-0">
                                             <div className="relative mb-3">
                                                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
@@ -388,7 +366,6 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
                                             </div>
                                         </div>
                                         
-                                        {/* Grilla de Platos */}
                                         <div className="flex-1 overflow-y-auto p-4 hide-scrollbar">
                                             {loading ? (
                                                 <div className="h-full flex flex-col justify-center items-center text-slate-400 opacity-60 gap-2">
@@ -396,19 +373,12 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
                                                 </div>
                                             ) : (
                                                 <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
-                                                    {filteredProducts.map(product => (
-                                                        <button 
-                                                            key={product.id} 
-                                                            onClick={() => addToCart(product)} 
-                                                            disabled={isSaving}
-                                                            className="bg-white p-4 md:p-5 rounded-2xl shadow-sm border border-slate-200 hover:border-brand-400 hover:shadow-md cursor-pointer transition-all active:scale-95 flex flex-col justify-between min-h-[130px] text-left focus:outline-none focus:ring-2 focus:ring-brand-500/20 disabled:opacity-50"
-                                                        >
+                                                    {filteredProducts.map((product: any) => (
+                                                        <button key={product.id} onClick={() => addToCart(product)} disabled={isSaving} className="bg-white p-4 md:p-5 rounded-2xl shadow-sm border border-slate-200 hover:border-brand-400 hover:shadow-md cursor-pointer transition-all active:scale-95 flex flex-col justify-between min-h-[130px] text-left focus:outline-none focus:ring-2 focus:ring-brand-500/20 disabled:opacity-50">
                                                             <h3 className="font-bold text-slate-700 leading-tight line-clamp-2 text-sm md:text-base">{product.name}</h3>
                                                             <div className="flex justify-between items-end mt-4 w-full">
                                                                 <span className="font-black text-brand-600 text-lg">${product.price.toLocaleString()}</span>
-                                                                <div className="w-8 h-8 rounded-full bg-brand-50 border border-brand-100 flex items-center justify-center text-brand-600">
-                                                                    <Plus className="w-4 h-4" />
-                                                                </div>
+                                                                <div className="w-8 h-8 rounded-full bg-brand-50 border border-brand-100 flex items-center justify-center text-brand-600"><Plus className="w-4 h-4" /></div>
                                                             </div>
                                                         </button>
                                                     ))}
@@ -417,7 +387,7 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
                                         </div>
                                     </>
                                 ) : (
-                                    /* Pantalla de Checkout (Cobro final) */
+                                    /* --- PANTALLA CHECKOUT Y PROPINA --- */
                                     <div className="flex-1 flex flex-col p-6 md:p-10 bg-slate-50 animate-in fade-in slide-in-from-right-8 duration-300 overflow-y-auto">
                                         <div className="flex items-center gap-4 mb-8">
                                             <button onClick={() => setIsCheckout(false)} className="p-2.5 bg-white rounded-xl shadow-sm text-slate-500 hover:text-slate-800 hover:bg-slate-100 border border-slate-200 transition-colors">
@@ -427,8 +397,24 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
                                         </div>
 
                                         <div className="bg-white p-8 md:p-10 rounded-3xl border border-slate-200 shadow-sm text-center mb-8 flex flex-col items-center">
-                                            <p className="text-slate-500 font-bold mb-2 uppercase tracking-widest text-sm">Total a Cobrar</p>
-                                            <p className="text-6xl md:text-7xl font-black text-slate-800 tracking-tight">${finalTotal.toLocaleString()}</p>
+                                            
+                                            {/* NUEVO: INPUT DE PROPINA */}
+                                            <div className="w-full flex flex-col items-center mb-6 pb-6 border-b border-slate-100">
+                                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Agregar Propina (Opcional)</label>
+                                                <div className="relative w-48">
+                                                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-black text-xl">$</span>
+                                                    <input 
+                                                        type="number" min="0" step="100"
+                                                        className="w-full pl-10 pr-4 py-3 bg-emerald-50/50 border border-emerald-200 rounded-xl outline-none focus:ring-4 focus:ring-emerald-500/20 text-emerald-800 font-black text-xl transition-all text-center"
+                                                        value={tipAmount}
+                                                        onChange={e => setTipAmount(e.target.value)}
+                                                        placeholder="0"
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            <p className="text-slate-500 font-bold mb-2 uppercase tracking-widest text-sm">Total Final a Cobrar</p>
+                                            <p className="text-5xl md:text-6xl font-black text-slate-800 tracking-tight">${(finalTotal + (Number(tipAmount) || 0)).toLocaleString()}</p>
                                         </div>
 
                                         <h3 className="font-bold text-slate-700 mb-4 ml-1">Seleccionar Método de Pago</h3>
@@ -453,7 +439,7 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
                                     </div>
                                 )}
 
-                                {/* --- SUB-MODAL DE NOTAS PARA COCINA --- */}
+                                {/* NOTAS DE COCINA */}
                                 <Transition appear show={noteModalOpen} as={Fragment}>
                                     <Dialog as="div" className="relative z-[99999]" onClose={() => setNoteModalOpen(false)}>
                                         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" />
@@ -479,9 +465,7 @@ export default function TablePOSModal({ isOpen, onClose, table }: TablePOSModalP
                                         </div>
                                     </Dialog>
                                 </Transition>
-
                             </div>
-
                         </Dialog.Panel>
                     </div>
                 </div>

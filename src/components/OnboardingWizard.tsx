@@ -2,6 +2,7 @@ import { useState, useRef, Fragment } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { supabase } from '../lib/supabase';
 import { uploadToCloudinary } from '../services/cloudinary';
+import { useAuthStore } from '../store/authStore'; // <-- IMPORTANTE: Traemos el store
 import {
     Rocket, Upload, Loader2, ArrowRight, Check, ArrowLeft,
     Dumbbell, Utensils, Briefcase, GraduationCap, HeartPulse, Wrench, Zap,
@@ -11,11 +12,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 interface OnboardingWizardProps {
     isOpen: boolean;
-    orgId: string;
+    orgId?: string | null; // Lo hacemos opcional por si es usuario nuevo
     onComplete: () => void;
 }
 
 export default function OnboardingWizard({ isOpen, orgId, onComplete }: OnboardingWizardProps) {
+    const { user, initializeAuth } = useAuthStore(); // Extraemos el usuario y la función de recarga
+
     const [step, setStep] = useState(1); // 1: Rubro, 2: Nombre, 3: Logo
     const [industry, setIndustry] = useState('');
     const [name, setName] = useState('');
@@ -25,7 +28,6 @@ export default function OnboardingWizard({ isOpen, orgId, onComplete }: Onboardi
 
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // --- LISTA EXPANDIDA DE INDUSTRIAS ---
     const industries = [
         { id: 'gym', label: 'Gimnasio / Sport', icon: <Dumbbell className="w-8 h-8 mb-2" />, color: 'hover:border-emerald-500 hover:bg-emerald-50 text-emerald-600' },
         { id: 'education', label: 'Academia / Clases', icon: <GraduationCap className="w-8 h-8 mb-2" />, color: 'hover:border-indigo-500 hover:bg-indigo-50 text-indigo-600' },
@@ -57,20 +59,39 @@ export default function OnboardingWizard({ isOpen, orgId, onComplete }: Onboardi
                 toast.dismiss('upload_logo');
             }
 
-            const { error } = await supabase
-                .from('organizations')
-                .update({
-                    name: name.trim(),
-                    industry: industry,
-                    logo_url: logoUrl,
-                    setup_completed: true
-                })
-                .eq('id', orgId);
+            const orgPayload = {
+                name: name.trim(),
+                industry: industry,
+                logo_url: logoUrl,
+                setup_completed: true
+            };
 
-            if (error) throw error;
+            // 🔥 FIX MÁGICO: Si tiene ID lo actualiza, si NO tiene ID lo CREA.
+            if (orgId) {
+                const { error } = await supabase.from('organizations').update(orgPayload).eq('id', orgId);
+                if (error) throw error;
+            } else {
+                if (!user) throw new Error("No hay sesión activa");
+                // Generamos un slug único (Ej: mi-negocio-4821)
+                const randomSuffix = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+                const slug = name.trim().toLowerCase().replace(/[^a-z0-9]/g, '') + '-' + randomSuffix;
+
+                const { error } = await supabase.from('organizations').insert([{
+                    ...orgPayload,
+                    slug: slug,
+                    owner_id: user.id
+                }]);
+                if (error) throw error;
+            }
+
+            // Recargamos los datos del usuario en memoria para destrabar el guardia
+            await initializeAuth();
 
             toast.success('¡Negocio configurado con éxito!');
             onComplete();
+            
+            // Forzamos la redirección al dashboard para limpiar la ruta
+            window.location.href = '/admin/dashboard';
 
         } catch (error: any) {
             console.error(error);
@@ -83,7 +104,6 @@ export default function OnboardingWizard({ isOpen, orgId, onComplete }: Onboardi
 
     return (
         <Transition appear show={isOpen} as={Fragment}>
-            {/* Es un modal que NO se puede cerrar haciendo clic afuera (Onboarding obligatorio) */}
             <Dialog as="div" className="relative z-[99999]" onClose={() => {}}>
                 <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-sm transition-opacity" />
 
@@ -91,10 +111,7 @@ export default function OnboardingWizard({ isOpen, orgId, onComplete }: Onboardi
                     <div className="flex min-h-full items-center justify-center p-4 text-center">
                         <Dialog.Panel className="w-full max-w-2xl transform overflow-hidden rounded-3xl bg-white text-left align-middle shadow-2xl transition-all flex flex-col min-h-[500px] animate-in zoom-in-95 duration-300">
                             
-                            {/* HEADER DINÁMICO */}
                             <div className="bg-slate-50 p-8 border-b border-slate-100 relative text-center shrink-0">
-                                
-                                {/* BOTÓN VOLVER (Solo en paso 2 y 3) */}
                                 {step > 1 && !loading && (
                                     <button
                                         onClick={() => setStep(step - 1)}
@@ -115,7 +132,6 @@ export default function OnboardingWizard({ isOpen, orgId, onComplete }: Onboardi
                                     {step === 1 ? 'Elegí tu Rubro' : step === 2 ? 'Nombre del Negocio' : 'Tu Identidad (Logo)'}
                                 </Dialog.Title>
                                 
-                                {/* Barra de Progreso Discreta */}
                                 <div className="flex items-center justify-center gap-2 mt-4">
                                     <div className={`h-1.5 w-8 rounded-full transition-colors ${step >= 1 ? 'bg-brand-500' : 'bg-slate-200'}`} />
                                     <div className={`h-1.5 w-8 rounded-full transition-colors ${step >= 2 ? 'bg-brand-500' : 'bg-slate-200'}`} />
@@ -123,7 +139,6 @@ export default function OnboardingWizard({ isOpen, orgId, onComplete }: Onboardi
                                 </div>
                             </div>
 
-                            {/* CONTENIDO VARIABLE */}
                             <div className="p-8 flex-1 flex flex-col justify-center">
                                 <AnimatePresence mode="wait">
                                     {step === 1 && (
@@ -227,7 +242,7 @@ export default function OnboardingWizard({ isOpen, orgId, onComplete }: Onboardi
                                             <div className="flex flex-col gap-3 pt-4">
                                                 <button
                                                     onClick={() => handleFinalSubmit(false)}
-                                                    disabled={loading || !logoFile} // Forzamos que, si usa este botón, haya elegido un logo
+                                                    disabled={loading || !logoFile} 
                                                     className="w-full py-4.5 bg-brand-600 text-white rounded-xl font-black text-lg flex items-center justify-center gap-2 hover:bg-brand-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-xl shadow-brand-500/20 active:scale-95"
                                                 >
                                                     {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Check className="w-5 h-5" />}

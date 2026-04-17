@@ -4,7 +4,7 @@ import { supabase } from '../../../lib/supabase';
 import { useAuthStore } from '../../../store/authStore';
 import { Plus, Search, User, CheckCircle, XCircle, ArrowRight, Loader2, Mail, Hash } from 'lucide-react';
 
-import CreateStudentModal from '../../../components/CreateStudentModal';
+import CreateClientModal from '../../../components/CreateClientModal';
 import GymOnboardingModal from '../../../components/GymOnboardingModal';
 
 interface Person {
@@ -17,21 +17,14 @@ interface Person {
     is_active: boolean;
 }
 
-const industryConfig: Record<string, { buttonLabel: string; modalAction: string }> = {
-    gym: { buttonLabel: 'Nuevo Alumno', modalAction: 'openGymModal' },
-    default: { buttonLabel: 'Nuevo Cliente', modalAction: 'openGenericModal' }
-};
-
-export default function Students() {
+export default function Clients() {
     const { orgData } = useAuthStore();
     const industry = orgData?.industry || 'default';
-    const config = industryConfig[industry] || industryConfig.default;
 
     const [people, setPeople] = useState<Person[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
 
-    // Control de Modales (Según el Rubro abre uno u otro)
     const [isGenericModalOpen, setIsGenericModalOpen] = useState(false);
     const [isGymModalOpen, setIsGymModalOpen] = useState(false);
 
@@ -40,13 +33,15 @@ export default function Students() {
     }, [orgData?.id]);
 
     async function fetchPeople() {
+        if (!orgData?.id) return; // BLINDAJE DE TYPESCRIPT
+        
         try {
             setLoading(true);
             const { data, error } = await supabase
                 .from('crm_people')
                 .select('*')
                 .eq('organization_id', orgData.id)
-                .eq('type', 'client') // Solo traemos Clientes, no Staff
+                .eq('type', 'client') 
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
@@ -59,11 +54,10 @@ export default function Students() {
     }
 
     const handleCreateClick = () => {
-        if (config.modalAction === 'openGymModal') setIsGymModalOpen(true);
+        if (industry === 'gym') setIsGymModalOpen(true);
         else setIsGenericModalOpen(true);
     };
 
-    // Buscador local: Filtra por Nombre Completo o por DNI
     const filteredPeople = people.filter(p =>
         p.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (p.identifier && p.identifier.includes(searchTerm))
@@ -72,15 +66,13 @@ export default function Students() {
     return (
         <div className="animate-in fade-in duration-500 max-w-7xl mx-auto pb-12">
             
-            {/* --- MODALES --- */}
-            <CreateStudentModal isOpen={isGenericModalOpen} onClose={() => setIsGenericModalOpen(false)} onSuccess={fetchPeople} />
+            <CreateClientModal isOpen={isGenericModalOpen} onClose={() => setIsGenericModalOpen(false)} onSuccess={fetchPeople} />
             <GymOnboardingModal isOpen={isGymModalOpen} onClose={() => setIsGymModalOpen(false)} onSuccess={fetchPeople} />
 
-            {/* --- CABECERA --- */}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
                 <div>
                     <h1 className="text-3xl font-black text-slate-800 tracking-tight">
-                        {industry === 'gym' ? 'Directorio de Alumnos' : 'Directorio de Clientes'}
+                        Directorio de Clientes
                     </h1>
                     <p className="text-slate-500 mt-1 font-medium text-sm sm:text-base">Gestión y control de personas registradas.</p>
                 </div>
@@ -89,11 +81,10 @@ export default function Students() {
                     className="w-full sm:w-auto bg-brand-600 hover:bg-brand-500 text-white px-6 py-3.5 rounded-xl flex items-center justify-center gap-2 font-bold shadow-lg shadow-brand-500/30 transition-all active:scale-95"
                 >
                     <Plus className="w-5 h-5" />
-                    {config.buttonLabel}
+                    Nuevo Cliente
                 </button>
             </div>
 
-            {/* --- BUSCADOR --- */}
             <div className="bg-white p-2 rounded-2xl shadow-sm border border-slate-200 mb-6">
                 <div className="relative">
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
@@ -107,7 +98,6 @@ export default function Students() {
                 </div>
             </div>
 
-            {/* --- LISTADO (Grilla/Tabla) --- */}
             <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden min-h-[400px]">
                 {loading ? (
                     <div className="p-16 flex flex-col items-center justify-center text-slate-400 gap-4 h-full">
@@ -120,11 +110,10 @@ export default function Students() {
                             <User className="w-10 h-10 text-slate-300" />
                         </div>
                         <h3 className="text-2xl font-black text-slate-700">No hay registros</h3>
-                        <p className="mt-2 max-w-sm font-medium">No se encontraron personas con esa búsqueda o la base de datos está vacía.</p>
+                        <p className="mt-2 max-w-sm font-medium">No se encontraron clientes con esa búsqueda o la base de datos está vacía.</p>
                     </div>
                 ) : (
                     <>
-                        {/* VISTA MÓVIL (Tarjetas de Listado) */}
                         <div className="md:hidden divide-y divide-slate-100">
                             {filteredPeople.map((person) => (
                                 <div key={person.id} className="p-5 hover:bg-slate-50 transition-colors flex flex-col gap-4 animate-in slide-in-from-right-4 duration-300">
@@ -144,14 +133,13 @@ export default function Students() {
                                             {person.is_active ? <CheckCircle className="w-5 h-5" /> : <XCircle className="w-5 h-5" />}
                                         </span>
                                     </div>
-                                    <Link to={`/admin/students/${person.id}`} className="w-full py-3.5 bg-slate-50 text-brand-600 rounded-xl font-bold text-sm text-center border border-slate-200 hover:bg-brand-50 transition-colors active:scale-95 shadow-sm">
+                                    <Link to={`/admin/clients/${person.id}`} className="w-full py-3.5 bg-slate-50 text-brand-600 rounded-xl font-bold text-sm text-center border border-slate-200 hover:bg-brand-50 transition-colors active:scale-95 shadow-sm">
                                         Ver Perfil Completo
                                     </Link>
                                 </div>
                             ))}
                         </div>
 
-                        {/* VISTA ESCRITORIO (Tabla) */}
                         <div className="hidden md:block overflow-x-auto hide-scrollbar">
                             <table className="w-full text-left">
                                 <thead className="bg-slate-50 border-b border-slate-100">
@@ -189,7 +177,7 @@ export default function Students() {
                                             </td>
                                             <td className="px-6 py-4 text-right">
                                                 <Link 
-                                                    to={`/admin/students/${person.id}`} 
+                                                    to={`/admin/clients/${person.id}`} 
                                                     className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-slate-50 text-slate-500 hover:text-brand-600 hover:bg-brand-50 rounded-xl font-bold text-sm transition-all border border-slate-200 hover:border-brand-200 opacity-0 group-hover:opacity-100 focus:opacity-100 active:scale-95 shadow-sm"
                                                 >
                                                     Ver Perfil <ArrowRight className="w-4 h-4" />
